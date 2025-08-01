@@ -266,12 +266,12 @@ const EmployeeList = () => {
                       <h4>1007</h4>
                     </div>
                   </div>
-                  <div>
+                  {/* <div>
                     <span className="badge badge-soft-purple badge-sm fw-normal">
                       <i className="ti ti-arrow-wave-right-down" />
                       +19.01%
                     </span>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             </div>
@@ -291,12 +291,12 @@ const EmployeeList = () => {
                       <h4>1007</h4>
                     </div>
                   </div>
-                  <div>
+                  {/* <div>
                     <span className="badge badge-soft-primary badge-sm fw-normal">
                       <i className="ti ti-arrow-wave-right-down" />
                       +19.01%
                     </span>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             </div>
@@ -316,12 +316,12 @@ const EmployeeList = () => {
                       <h4>1007</h4>
                     </div>
                   </div>
-                  <div>
+                  {/* <div>
                     <span className="badge badge-soft-dark badge-sm fw-normal">
                       <i className="ti ti-arrow-wave-right-down" />
                       +19.01%
                     </span>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             </div>
@@ -343,12 +343,12 @@ const EmployeeList = () => {
                       <h4>67</h4>
                     </div>
                   </div>
-                  <div>
+                  {/* <div>
                     <span className="badge badge-soft-secondary badge-sm fw-normal">
                       <i className="ti ti-arrow-wave-right-down" />
                       +19.01%
                     </span>
-                  </div>
+                  </div> */}
                 </div>
               </div>
             </div>

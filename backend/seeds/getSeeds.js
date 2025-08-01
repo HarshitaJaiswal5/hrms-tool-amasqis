@@ -4,7 +4,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 // Replace with your actual MongoDB URI and DB info
 const uri = 'mongodb+srv://admin:AdMin-2025@cluster0.iooxltd.mongodb.net/';
 const dbName = '68443081dcdfe43152aebf80';
-const collectionName = 'attendance';
+const collectionName = 'hr';
 
 async function getAllLeads() {
     const client = new MongoClient(uri, { useUnifiedTopology: true });

@@ -4,6 +4,7 @@ import adminController from "../controllers/admin/admin.controller.js";
 import employeeDashboardController from "../controllers/employee/employee.controller.js";
 
 import pipelineController from "../controllers/pipeline/pipeline.controllers.js";
+import hrDashboardController from "../controllers/hr/hr.controller.js";
 
 
 const router = (socket, io, role) => {
@@ -21,7 +22,9 @@ const router = (socket, io, role) => {
       pipelineController(socket, io);
       break;
     case "hr":
-      console.log("HR controller not implemented yet");
+      hrDashboardController(socket,io);
+      console.log("HR controller implemented ");
+
       break;
     case "employee":
       console.log("Attaching employee controller...");       
