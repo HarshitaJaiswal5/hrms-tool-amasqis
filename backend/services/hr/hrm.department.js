@@ -2,47 +2,75 @@ import mongoose from "mongoose";
 import { ObjectId } from "mongodb";
 import { getTenantCollections } from "../../config/db.js";
 
-export const addDepartment = async (companyId, hrId, payload) => {
-    try {
-        
-        if (!companyId || !hrId || !payload) {            
-            return { done: false, error: "Missing required fields" };
-        }
-        if (!payload.department) {           
-            return { done: false, message: "Department name are required" };
-        }
-
-        const collections = getTenantCollections(companyId);
-        const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
-        if (!hrExists) return { done: false, message: "HR doesn't exist" };
-
-        const departmentExists = await collections.departments.countDocuments({
-            name: { $regex: `^${payload.department}$`, $options: 'i' }
-        });
-        if (departmentExists) {
-            return { done: false, message: "Department already exists" }
-        };
-
-        const newDepartment = {
-            department: payload.department,
-            status: payload.status || "active",
-            createdBy: new ObjectId(hrId),
-            createdAt: new Date(),
-        };
-
-        const result = await collections.departments.insertOne(newDepartment);
-        return {
-            done: true,
-            data: { _id: result.insertedId, ...newDepartment },
-            message: "Department added successfully"
-        };
-    } catch (error) {
-        return {
-            done: false,
-            error: "Internal server error",
-            systemError: error.message
-        };
+export const allDepartments = async (companyId, hrId) => {
+  try {
+    if (!companyId || !hrId) {
+      return { done: false, error: "All fields are required including file upload" };
     }
+
+    const collections = getTenantCollections(companyId);
+    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    if (!hrExists) return { done: false, error: "HR not found" };
+
+    const result = await collections.departments
+      .find({}, { projection: { department: 1, _id: 1 } })
+      .toArray();
+
+    return {
+      done: true,
+      data: result,
+      message: "Departments fetched successfully"
+    };
+
+  } catch (error) {
+    return {
+      done: false,
+      error: `Failed to fetch departments: ${error.message}`
+    };
+  }
+}
+
+export const addDepartment = async (companyId, hrId, payload) => {
+  try {
+
+    if (!companyId || !hrId || !payload) {
+      return { done: false, error: "Missing required fields" };
+    }
+    if (!payload.department) {
+      return { done: false, message: "Department name are required" };
+    }
+
+    const collections = getTenantCollections(companyId);
+    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    if (!hrExists) return { done: false, message: "HR doesn't exist" };
+
+    const departmentExists = await collections.departments.countDocuments({
+      name: { $regex: `^${payload.department}$`, $options: 'i' }
+    });
+    if (departmentExists) {
+      return { done: false, message: "Department already exists" }
+    };
+
+    const newDepartment = {
+      department: payload.department,
+      status: payload.status || "active",
+      createdBy: new ObjectId(hrId),
+      createdAt: new Date(),
+    };
+
+    const result = await collections.departments.insertOne(newDepartment);
+    return {
+      done: true,
+      data: { _id: result.insertedId, ...newDepartment },
+      message: "Department added successfully"
+    };
+  } catch (error) {
+    return {
+      done: false,
+      error: "Internal server error",
+      systemError: error.message
+    };
+  }
 };
 
 export const displayDepartment = async (companyId, hrId, filters = {}) => {
@@ -50,6 +78,8 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
     if (!companyId || !hrId) {
       return { done: false, error: "Missing required fields" };
     }
+    console.log("*****************************");
+
 
     const collections = getTenantCollections(companyId);
     const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
@@ -66,8 +96,20 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
       { $sort: { createdAt: -1 } },
       {
         $lookup: {
+          from: "departments",
+          let: { deptId: "$departmentId" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$_id", "$$deptId"] } } },
+            { $project: { department: 1 } }
+          ],
+          as: "departmentInfo"
+        }
+      },
+      { $unwind: "$departmentInfo" },
+      {
+        $lookup: {
           from: "employees",
-          let: { departmentId: "$_id" },
+          let: { departmentId: "$departmentId" },
           pipeline: [
             {
               $match: {
@@ -86,12 +128,15 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
       {
         $addFields: {
           employeeCount: { $size: "$employees" },
-        },
+          departmentName: "$departmentInfo.department"
+        }
       },
       { $project: { employees: 0 } },
     ];
 
     const departments = await collections.departments.aggregate(pipeline).toArray();
+    console.log("departments", departments);
+
 
     return {
       done: true,
@@ -193,7 +238,7 @@ export const updateDepartment = async (companyId, hrId, payload) => {
 
 export const deleteDepartment = async (companyId, hrId, departmentId) => {
   try {
-    if (!companyId || !hrId || !departmentId) {    
+    if (!companyId || !hrId || !departmentId) {
       return { done: false, error: "Missing required fields" };
     }
 

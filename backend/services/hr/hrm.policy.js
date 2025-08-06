@@ -2,37 +2,6 @@ import mongoose from "mongoose";
 import { ObjectId } from "mongodb";
 import { getTenantCollections } from "../../config/db.js";
 
-export const allDepartments = async (companyId, hrId) => {
-    try {
-        if (!companyId || !hrId) {
-            return { done: false, error: "All fields are required including file upload" };
-        }
-
-        const collections = getTenantCollections(companyId);
-        const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
-        if (!hrExists) return { done: false, error: "HR not found" };
-
-        const result = await collections.departments
-            .find({}, { projection: { department: 1, _id: 0 } })
-            .toArray();
-
-        const departmentNames = result.map(dept => dept.name);
-        return {
-            done: true,
-            data: {
-                departmentNames,
-            },
-            message: "Departments fetched successfully"
-        };
-
-    } catch (error) {
-        return {
-            done: false,
-            error: `Failed to fetch departments: ${error.message}`
-        };
-    }
-}
-
 export const addPolicy = async (companyId, hrId, policyData) => {
     try {
         if (!companyId || !hrId || !policyData) {

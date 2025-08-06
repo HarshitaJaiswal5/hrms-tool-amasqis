@@ -1,8 +1,9 @@
 import { ObjectId } from "mongodb";
 import { DateTime } from "luxon";
 import * as hrServices from "../../services/hr/hrm.employee.js";
-import * as hrPolicy from "../../services/hr/hrm.policy.js"
-import * as hrmDepartment from "../../services/hr/hrm.department.js"
+import * as hrPolicy from "../../services/hr/hrm.policy.js";
+import * as hrmDesignation from "../../services/hr/hrm.designation.js"
+import * as hrmDepartment from "../../services/hr/hrm.department.js";
 
 const hrDashboardController = (socket, io) => {
     const isDevelopment = process.env.NODE_ENV === "development";
@@ -46,10 +47,18 @@ const hrDashboardController = (socket, io) => {
 
     socket.on("hr/departments/get", async (data) => {
         try {
+            console.log("[hr/departments/get] Event received with data:", data);
+
             const { companyId, hrId } = validateHrAccess(socket);
-            const response = await hrPolicy.allDepartments(companyId, hrId);
+            console.log("[hr/departments/get] Access validated - companyId:", companyId, "hrId:", hrId);
+
+            const response = await hrmDepartment.allDepartments(companyId, hrId);
+            // console.log("[hr/departments/get] Service response:", response);
+
             socket.emit("hr/departments/get-response", response);
+            // console.log("[hr/departments/get] Response emitted");
         } catch (error) {
+            console.error("[hr/departments/get] Error:", error);
             socket.emit("hr/departments/get-response", {
                 done: false,
                 error: "Unexpected error fetching departments",
@@ -424,7 +433,7 @@ const hrDashboardController = (socket, io) => {
     }));
 
     socket.on("hrm/departments/delete", withRateLimit(async (data) => {
-           try {
+        try {
 
             const { companyId, hrId } = validateHrAccess(socket);
 
@@ -433,7 +442,7 @@ const hrDashboardController = (socket, io) => {
             }
 
             const departmentId = typeof data._id === "string" ? data._id.trim() : "";
-            if (!departmentId) {                
+            if (!departmentId) {
                 throw new Error("department Id is required for deletion");
             }
 
@@ -447,6 +456,174 @@ const hrDashboardController = (socket, io) => {
             });
         }
     }));
+
+    // crud ops on designation
+
+    socket.on("hrm/designations/add", withRateLimit(async (data) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data) {
+                throw new Error("Data is required for creation");
+            }
+
+            const departmentId = typeof data.departmentId === "string" ? data.departmentId.trim() : "";
+            if (!departmentId) {
+                throw new Error("Department name and display name are required");
+            }
+            const designationName = typeof data.designationName === "string" ? data.designationName.trim() : "";
+            if (!designationName) {
+                throw new Error("Department name and display name are required");
+            }
+
+            let status = "";
+            if (data.status) {
+                status = String(data.status).trim().toLowerCase();
+            };
+            const isValidStatus = ["active", "inactive"].includes(status);
+
+            const payload = {
+                designation: designationName,
+                departmentId: departmentId,
+                status: isValidStatus ? status : "active",
+            };
+
+            const response = await hrmDesignation.addDesignation(companyId, hrId, payload);
+            socket.emit("hrm/designations/add-response", response);
+        } catch (error) {
+            console.log(error);
+
+            socket.emit("hrm/designations/add-response", {
+                done: false,
+                error: error.message || "Unexpected error adding department",
+            });
+        }
+    }));
+
+    socket.on("hrm/designations/get", async (filters) => {
+        try {
+            console.log("[hrm/designations/get] Event received with filters:", filters);
+
+            const { companyId, hrId } = validateHrAccess(socket);
+            console.log("[hrm/designations/get] Validated access - companyId:", companyId, "hrId:", hrId);
+
+            const sanitizedFilters = {};
+            if (filters && typeof filters === "object") {
+                if (typeof filters.status === "string" && filters.status.trim() !== "") {
+                    const statusTrim = filters.status.trim();
+                    if (statusTrim.toLowerCase() !== "none") {
+                        sanitizedFilters.status = statusTrim;
+                    }
+                }
+                if (typeof filters.department === "string" && filters.department.trim() !== "") {
+                    sanitizedFilters.departmentId = filters.department.trim();
+                }
+            }
+            console.log("[hrm/designations/get] Sanitized filters:", sanitizedFilters);
+
+            const result = await hrmDesignation.displayDesignations(companyId, hrId, sanitizedFilters);
+            // console.log("[hrm/designations/get] Service result:", result);
+
+            if (!result.done) {
+                console.error("[hrm/designations/get] Service returned failure:", result.error || result.message);
+                throw new Error(result.error || result.message || "Failed to display designations");
+            }
+
+            socket.emit("hrm/designations/get-response", result);
+            // console.log("[hrm/designations/get] Response emitted");
+        } catch (error) {
+            console.error("[hrm/designations/get] Error:", error);
+            socket.emit("hrm/designations/get-response", {
+                done: false,
+                error: error.message || "Unexpected error fetching designations",
+            });
+        }
+    });
+
+    socket.on("hrm/designations/delete", async (data) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data || typeof data !== "object") {
+                throw new Error("Invalid payload");
+            }
+
+            const designationId = typeof data._id === "string" ? data._id.trim() : "";
+            if (!designationId) {
+                throw new Error("Department Id is required for deletion");
+            }
+
+            const result = await hrmDesignation.deleteDesignation(companyId, hrId, designationId);
+
+            if (!result.done) {
+                throw new Error(result.error || result.message || "Delete failed");
+            }
+
+            socket.emit("hrm/designations/delete-response", result);
+        } catch (error) {
+            console.error("[hrm/designations/delete] Error:", error);
+            socket.emit("hrm/designations/delete-response", {
+                done: false,
+                error: error.message || "Unexpected error deleting department",
+            });
+        }
+    });
+
+    socket.on("hrm/designations/update", async (payload) => {
+        try {
+
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!payload || typeof payload !== "object") {
+                throw new Error("Invalid payload");
+            }
+
+            if (!companyId || !hrId || !payload) {
+                throw new Error("Missing required fields: companyId, hrId, and payload are required");
+            }
+
+            // Deep clone payload to avoid mutating original object
+            payload = { ...payload };
+
+            if (payload.designation && typeof payload.designation === "string") {
+                payload.designation = payload.designation.trim();
+                if (payload.designation === "") delete payload.designation;
+            }
+
+            if (payload.departmentId && typeof payload.departmentId === "string") {
+                payload.departmentId = payload.departmentId.trim();
+                if (payload.departmentId === "") delete payload.departmentId;
+            }
+
+            if (payload.status && typeof payload.status === "string") {
+                payload.status = payload.status.trim().toLowerCase();
+                if (!["active", "inactive"].includes(payload.status)) delete payload.status;
+            }
+
+            if (payload.designationId && typeof payload.designationId === "string") {
+                payload.designationId = payload.designationId.trim();
+                if (payload.designationId === "") throw new Error("Designation ID is required and cannot be empty");
+            } else {
+                throw new Error("Designation ID is required");
+            }
+
+            const result = await hrmDesignation.updateDesignation(companyId, hrId, payload);
+            if (!result.done) {
+                throw new Error(result.error || "Failed to update designation");
+            }
+
+            socket.emit("hrm/designations/update-response", {
+                done: true,
+                message: result.message || "Designation updated successfully",
+            });
+        } catch (error) {
+            console.error("[hrm/designations/update] Error:", error);
+            socket.emit("hrm/designations/update-response", {
+                done: false,
+                error: error.message || "Unexpected error updating designation",
+            });
+        }
+    });
 
 
 }
