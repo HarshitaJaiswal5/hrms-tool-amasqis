@@ -70,11 +70,11 @@ const PredefinedDateRanges: React.FC<PredefinedDateRangesProps> = ({
           endDate: endMoment.toDate(),
           ranges: {
             "All Time": [defaultStart.toDate(), defaultEnd.toDate()],
-            Today: [
+            "Today": [
               moment.utc().startOf("day").toDate(),
               moment.utc().endOf("day").toDate(),
             ],
-            Yesterday: [
+            "Yesterday": [              
               moment.utc().subtract(1, "days").startOf("day").toDate(),
               moment.utc().subtract(1, "days").endOf("day").toDate(),
             ],

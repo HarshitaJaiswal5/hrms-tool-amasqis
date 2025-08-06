@@ -63,7 +63,14 @@ export const getTenantCollections = (tenantDbName) => {
     //Pipeline Collections
     pipelines: db.collection("pipelines"),
     stages: db.collection("stages"),
-    
+
+    // hr employee section collection
+    hr: db.collection("hr"),   
+    permissions:  db.collection("permissions"),
+    policy: db.collection("policy"),
+    designations: db.collection("designation"),
+    assets: db.collection("assets"),
+
 
   };
 };

@@ -24,7 +24,6 @@ const router = (socket, io, role) => {
     case "hr":
       hrDashboardController(socket,io);
       console.log("HR controller implemented ");
-
       break;
     case "employee":
       console.log("Attaching employee controller...");       

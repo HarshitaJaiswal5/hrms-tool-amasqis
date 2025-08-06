@@ -14,7 +14,7 @@ const DeleteModal = () => {
                 <span className="avatar avatar-xl bg-transparent-danger text-danger mb-3">
                   <i className="ti ti-trash-x fs-36" />
                 </span>
-                <h4 className="mb-1">Confirm Kaka</h4>
+                <h4 className="mb-1">Confirm</h4>
                 <p className="mb-3">
                   You want to delete all the marked items, this cant be undone
                   once you delete.
