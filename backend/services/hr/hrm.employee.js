@@ -1,3 +1,4 @@
+import bcrypt from 'bcrypt';
 import { ObjectId } from "mongodb";
 import { generateId } from '../../utils/generateId.js';
 import { getTenantCollections } from "../../config/db.js";
@@ -10,57 +11,127 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
     const hrCount = await collections.hr.countDocuments({
       _id: new ObjectId(hrId),
     });
+
     if (hrCount === 0) {
+      console.warn("⚠️ HR not found in specified company");
       return { done: false, error: "HR not found in the specified company" };
     }
-    const query = {};
 
-    if (filters.status && ['Active', 'Inactive'].includes(filters.status)) {
-      query.status = filters.status;
+    let start, end;
+    if (filters.startDate) {
+      start = new Date(filters.startDate);
+      start.setUTCHours(0, 0, 0, 0);
+    }
+    if (filters.endDate) {
+      end = new Date(filters.endDate);
+      end.setUTCHours(23, 59, 59, 999);
     }
 
-    if (filters.designation && typeof filters.designation === 'string') {
-      query.designation = filters.designation;
+    const baseMatch = {};
+    if (filters.status && ["active", "inactive"].includes(filters.status)) {
+      baseMatch.status = filters.status;
+    }
+    if (filters.departmentId && typeof filters.departmentId === "string") {
+      baseMatch.departmentId = filters.departmentId;
     }
 
-    if (filters.startDate || filters.endDate) {
-      query.joiningDate = {};
-      if (filters.startDate) {
-        const start = new Date(filters.startDate);
-        if (!isNaN(start.getTime())) query.joiningDate.$gte = start;
-      }
-      if (filters.endDate) {
-        const end = new Date(filters.endDate);
-        if (!isNaN(end.getTime())) query.joiningDate.$lte = end;
-      }
-      if (Object.keys(query.joiningDate).length === 0) {
-        delete query.joiningDate;
-      }
+    // Create aggregation pipeline
+    const pipeline = [
+      {
+        $addFields: {
+          joiningDate: { $toDate: "$joiningDate" }
+        }
+      },
+      // Apply base match & date range
+      {
+        $match: {
+          ...baseMatch,
+          ...(start || end
+            ? {
+              joiningDate: {
+                ...(start ? { $gte: start } : {}),
+                ...(end ? { $lte: end } : {})
+              }
+            }
+            : {})
+        }
+      },
+      {
+        $lookup: {
+          from: "designations",
+          localField: "designation",
+          foreignField: "_id",
+          as: "designationInfo",
+        },
+      },
+      {
+        $lookup: {
+          from: "departments",
+          localField: "department",
+          foreignField: "_id",
+          as: "departmentInfo",
+        },
+      },
+      {
+        $addFields: {
+          designationName: { $arrayElemAt: ["$designationInfo.name", 0] },
+          departmentName: { $arrayElemAt: ["$departmentInfo.name", 0] },
+        },
+      },
+      {
+        $project: {
+          designationInfo: 0,
+          departmentInfo: 0,
+          // Keep only necessary fields
+        },
+      },
+    ];
+
+    // Get employees with populated names
+    const employees = await collections.employees.aggregate(pipeline).toArray();
+
+    if (employees.length > 0) {
+      console.log(employees[0].joiningDate);
+    } else {
+      console.log("No employees found");
     }
 
-    const employees = await collections.employees.find(query).toArray();
-
-    const [totalEmployees, activeCount, inactiveCount, newJoinersCount] = await Promise.all([
+    // Get counts (not filtered — global stats)
+    const [
+      totalEmployees,
+      activeCount,
+      inactiveCount,
+      newJoinersCount,
+    ] = await Promise.all([
       collections.employees.countDocuments({}),
-      collections.employees.countDocuments({ status: 'Active' }),
-      collections.employees.countDocuments({ status: 'InActive' }),
+      collections.employees.countDocuments({ status: "active" }),
+      collections.employees.countDocuments({ status: "inactive" }),
       collections.employees.countDocuments({
-        joiningDate: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+        joiningDate: {
+          $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        },
       }),
     ]);
 
     return {
-      stats: {
-        totalEmployees,
-        activeCount,
-        inactiveCount,
-        newJoinersCount,
-      },
-      employees,
+      done: true,
+      message: "Employee details updated successfully",
+      data: {
+        stats: {
+          totalEmployees,
+          activeCount,
+          inactiveCount,
+          newJoinersCount,
+        },
+        employees,
+      }
     };
   } catch (error) {
-    console.error("Error in getEmployeesWithStats:", error);
-    return { done: false, error: `Failed to get employee stats: ${error.message}` };
+    console.error("❌ Error in getEmployeesWithStats:", error);
+    return {
+      done: false,
+      error: `Failed to get employee stats: ${error.message}`,
+    };
   }
 };
 
@@ -272,7 +343,10 @@ export const deleteEmployee = async (companyId, hrId, employeeId) => {
     return {
       done: true,
       message: "Employee deleted successfully",
-      permissionsDeleted: permissionsDelete.deletedCount
+      data: {
+        employeeDeleted: employeeDelete.deletedCount,
+        permissionsDeleted: permissionsDelete.deletedCount
+      }
     };
 
   } catch (error) {
@@ -286,64 +360,94 @@ export const deleteEmployee = async (companyId, hrId, employeeId) => {
   }
 };
 
-export const addEmployee = async (companyId, hrId, employeeData) => {
+export const addEmployee = async (companyId, hrId, employeeData, permissionsData) => {
   try {
-    if (!companyId || !hrId || !employeeData?.email) {
-      return { done: false, error: "Missing required parameters" };
+    if (!companyId || !hrId) {
+      return { done: false, error: "Missing companyId or hrId." };
+    }
+
+    const requiredFields = [
+      "email", "firstName", "lastName", "userName",
+      "password", "phone", "company", "departmentId",
+      "designationId", "joiningDate"
+    ];
+    const missingFields = requiredFields.filter(
+      field => !employeeData[field] && employeeData[field] !== 0
+    );
+    if (missingFields.length > 0) {
+      return { done: false, error: `Missing required fields: ${missingFields.join(", ")}` };
+    }
+
+    const hasProperPermissionsData =
+      permissionsData &&
+      typeof permissionsData === "object" &&
+      permissionsData.enabledModules &&
+      permissionsData.permissions &&
+      Object.keys(permissionsData.enabledModules).length > 0 &&
+      Object.keys(permissionsData.permissions).length > 0;
+
+    if (!hasProperPermissionsData) {
+      return { done: false, error: "Missing or incomplete permissions data." };
     }
 
     const collections = getTenantCollections(companyId);
-    const hrExists = await collections.hr.countDocuments({
-      _id: new ObjectId(hrId)
-    });
-    if (!hrExists) return { done: false, error: "HR not found" };
 
-    const emailExists = await collections.employees.countDocuments({
-      email: employeeData.email,
-    });
-    if (emailExists) return { done: false, error: "Employee email already exists" };
-
-    let employeeId;
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts) {
-      attempts++;
-      employeeId = generateId('Emp');
-
-      const idExists = await collections.employees.countDocuments({
-        employeeId,
-      }, { limit: 1 });
-
-      if (!idExists) break;
+    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    if (!hrExists) {
+      return { done: false, error: "HR not found." };
     }
 
-    if (attempts >= maxAttempts) {
-      return { done: false, error: "Failed to generate unique employee ID" };
+    const emailExists = await collections.employees.countDocuments({ email: employeeData.email });
+    if (emailExists) {
+      return { done: false, error: "Employee email already exists." };
     }
 
-    const result = await collections.employees.insertOne({
+    const saltRounds = 10;
+
+    if (!employeeData.password) {
+      return { done: false, error: "Password is required" };
+    }
+
+    const hashedPassword = await bcrypt.hash(employeeData.password, saltRounds);
+
+    const employeeResult = await collections.employees.insertOne({
       ...employeeData,
-      employeeId,
+      password: hashedPassword,
       createdAt: new Date(),
       updatedAt: new Date(),
-      status: "Active"
+      status: "active"
     });
+
+    if (!employeeResult.insertedId) {
+      return { done: false, error: "Failed to add employee." };
+    }
+
+    const employeeId = employeeResult.insertedId;
+
+    const permissionsResult = await collections.permissions.insertOne({
+      employeeId,
+      enabledModules: permissionsData.enabledModules,
+      permissions: permissionsData.permissions,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    if (!permissionsResult.insertedId) {
+      await collections.employees.deleteOne({ _id: employeeId });
+      return { done: false, error: "Failed to save permissions." };
+    }
 
     return {
       done: true,
-      data: { employeeId },
-      message: "Employee added successfully"
+      data: { employeeId: employeeId.toString() },
+      message: "Employee and permissions added successfully"
     };
-
   } catch (error) {
-    console.error("Error adding employee:", error);
-    return {
-      done: false,
-      error: error.message.includes('duplicate key') ?
-        "Employee with same details already exists" :
-        "Failed to add employee"
-    };
+    console.error("Error adding employee with permissions:", error);
+    const errorMsg = error.message && error.message.includes("duplicate key")
+      ? "Employee with same details already exists"
+      : "Failed to add employee";
+    return { done: false, error: errorMsg };
   }
 };
 
@@ -1068,7 +1172,7 @@ export const raiseAssetIssue = async (companyId, hrId, payload = {}) => {
       };
     }
 
-    const issueId = generateId("ISS") ;
+    const issueId = generateId("ISS");
 
     const issueData = {
       isIssue: true,
@@ -1182,86 +1286,86 @@ export const getBankDetails = async (companyId, hrId, employeeId) => {
 ///// generic function
 
 export const getEmployeeInfo = async (companyId, hrId, employeeId, infoType) => {
-    const session = client.startSession();
-    try {
-      session.startTransaction();
+  const session = client.startSession();
+  try {
+    session.startTransaction();
 
-      if (!companyId || !hrId || !employeeId || !infoType) {
-        await session.abortTransaction();
-        return { done: false, message: "Missing required parameters" };
-      }
+    if (!companyId || !hrId || !employeeId || !infoType) {
+      await session.abortTransaction();
+      return { done: false, message: "Missing required parameters" };
+    }
 
-      const allowedTypes = [
-        'education',
-        'family',
-        'experience',
-        'assets',
-        'emergencyContacts',
-        'personal',
-        'statutory',
-      ];
+    const allowedTypes = [
+      'education',
+      'family',
+      'experience',
+      'assets',
+      'emergencyContacts',
+      'personal',
+      'statutory',
+    ];
 
-      if (!allowedTypes.includes(infoType)) {
-        await session.abortTransaction();
-        return {
-          done: false,
-          message: `Invalid infoType. Allowed: ${allowedTypes.join(', ')}`
-        };
-      }
-
-      const collections = getTenantCollections(companyId);
-      const employeeObjId = new ObjectId(employeeId);
-
-      const hrExists = await collections.hr.countDocuments(
-        { _id: new ObjectId(hrId) },
-        { session }
-      );
-
-      if (!hrExists) {
-        await session.abortTransaction();
-        return { done: false, message: "HR not authorized" };
-      }
-
-      const employee = await collections.employees.findOne(
-        { _id: employeeObjId },
-        {
-          [`+${infoType}`]: 1,
-          updatedAt: 1
-        },
-        { session }
-      );
-
-      if (!employee) {
-        await session.abortTransaction();
-        return { done: false, message: "Employee not found" };
-      }
-
-      let resultData;
-      if (infoType === 'assets' || infoType === 'emergencyContacts') {
-        resultData = employee[infoType] || [];
-      } else {
-        resultData = employee[infoType] || {};
-        if (Array.isArray(resultData)) {
-          resultData = resultData[0] || {};
-        }
-      }
-
-      await session.commitTransaction();
-      return {
-        done: true,
-        data: {
-          [infoType]: resultData,
-          lastUpdated: employee.updatedAt
-        }
-      };
-
-    } catch (error) {
+    if (!allowedTypes.includes(infoType)) {
       await session.abortTransaction();
       return {
         done: false,
-        message: "Internal server error",
+        message: `Invalid infoType. Allowed: ${allowedTypes.join(', ')}`
       };
-    } finally {
-      session.endSession();
     }
+
+    const collections = getTenantCollections(companyId);
+    const employeeObjId = new ObjectId(employeeId);
+
+    const hrExists = await collections.hr.countDocuments(
+      { _id: new ObjectId(hrId) },
+      { session }
+    );
+
+    if (!hrExists) {
+      await session.abortTransaction();
+      return { done: false, message: "HR not authorized" };
+    }
+
+    const employee = await collections.employees.findOne(
+      { _id: employeeObjId },
+      {
+        [`+${infoType}`]: 1,
+        updatedAt: 1
+      },
+      { session }
+    );
+
+    if (!employee) {
+      await session.abortTransaction();
+      return { done: false, message: "Employee not found" };
+    }
+
+    let resultData;
+    if (infoType === 'assets' || infoType === 'emergencyContacts') {
+      resultData = employee[infoType] || [];
+    } else {
+      resultData = employee[infoType] || {};
+      if (Array.isArray(resultData)) {
+        resultData = resultData[0] || {};
+      }
+    }
+
+    await session.commitTransaction();
+    return {
+      done: true,
+      data: {
+        [infoType]: resultData,
+        lastUpdated: employee.updatedAt
+      }
+    };
+
+  } catch (error) {
+    await session.abortTransaction();
+    return {
+      done: false,
+      message: "Internal server error",
+    };
+  } finally {
+    session.endSession();
+  }
 };
