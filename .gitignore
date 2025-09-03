@@ -1,1 +1,17 @@
-node_modules
+# Ignore all .log files
+*.log
+
+# Ignore the 'node_modules' directory
+node_modules/
+
+# Ignore a specific file named 'config.local.js'
+config.local.js
+
+# Ignore all files in the 'build' directory and its subdirectories
+build/
+
+# Ignore .DS_Store files (macOS specific)
+.DS_Store
+
+# Exclude a specific file from being ignored, even if it matches a pattern
+!important_file.txt

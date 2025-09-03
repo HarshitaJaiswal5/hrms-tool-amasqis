@@ -1,7 +1,0 @@
-@mixin note() {
-    &--note{
-        &.draggable{
-            z-index: 9;
-        }
-    }
-}

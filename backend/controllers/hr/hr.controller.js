@@ -4,6 +4,7 @@ import * as hrServices from "../../services/hr/hrm.employee.js";
 import * as hrPolicy from "../../services/hr/hrm.policy.js";
 import * as hrmDesignation from "../../services/hr/hrm.designation.js"
 import * as hrmDepartment from "../../services/hr/hrm.department.js";
+import * as hrmEmployee from "../../services/hr/hrm.employee.js"
 
 const hrDashboardController = (socket, io) => {
     const isDevelopment = process.env.NODE_ENV === "development";
@@ -45,6 +46,65 @@ const hrDashboardController = (socket, io) => {
         };
     };
 
+    const isObject = (val) => val && typeof val === "object" && !Array.isArray(val);
+
+    const validateEmployeeData = (data) => {
+        if (typeof data !== "object" || data === null) {
+            return "Employee data must be an object";
+        }
+
+        const requiredStringFields = [
+            "about", "avatarUrl", "company", "departmentId",
+            "designationId", "email", "employeeId", "firstName", "lastName",
+            "password", "phone", "userName"
+        ];
+
+        for (const field of requiredStringFields) {
+            if (!(field in data)) {
+                return `Missing required field: ${field}`;
+            }
+            if (typeof data[field] !== "string" || data[field].trim() === "") {
+                return `Field '${field}' must be a non-empty string`;
+            }
+        }
+
+        if (!("joiningDate" in data)) {
+            return "Missing required field: joiningDate";
+        }
+        const joiningDate = data.joiningDate;
+        if (typeof joiningDate !== "string" && !(joiningDate instanceof Date)) {
+            if (!joiningDate || typeof joiningDate.$d !== "object") {
+                return "joiningDate must be a string, Date object, or valid date wrapper";
+            }
+        }
+
+        if (!isObject(data.enabledModules)) {
+            return "enabledModules must be an object";
+        }
+        for (const [module, enabled] of Object.entries(data.enabledModules)) {
+            if (typeof enabled !== "boolean") {
+                return `enabledModules.${module} must be boolean`;
+            }
+        }
+
+        if (!isObject(data.permissions)) {
+            return "permissions must be an object";
+        }
+        const expectedActions = ["read", "write", "create", "delete", "import", "export"];
+        for (const [module, perms] of Object.entries(data.permissions)) {
+            if (!isObject(perms)) {
+                return `permissions.${module} must be an object`;
+            }
+            for (const action of expectedActions) {
+                if (typeof perms[action] !== "boolean") {
+                    return `permissions.${module}.${action} must be boolean`;
+                }
+            }
+        }
+
+        return null;
+    };
+
     socket.on("hr/departments/get", async (data) => {
         try {
             console.log("[hr/departments/get] Event received with data:", data);
@@ -66,13 +126,13 @@ const hrDashboardController = (socket, io) => {
         }
     });
 
-    socket.on("hr/employee/get-employee-stats", async (payload) => {
+    socket.on("hrm/employees/get-employee-stats", async (payload) => {
         try {
             const { companyId, hrId } = validateHrAccess(socket);
             const {
                 startDate: rawStartDate,
                 endDate: rawEndDate,
-                designation: rawDesignation,
+                departmentId: rawDeparmentId,
                 status: rawStatus,
             } = payload || {};
 
@@ -88,26 +148,24 @@ const hrDashboardController = (socket, io) => {
                 endDate = isNaN(ed.getTime()) ? null : ed;
             }
 
-            const allowedDesignations = ["Developer", "Executive", "Manager"];
             const allowedStatus = ["active", "inactive"];
 
-            const designation =
-                typeof rawDesignation === "string" && allowedDesignations.includes(rawDesignation.trim())
-                    ? rawDesignation.trim()
-                    : null;
+            const departmentId =
+                typeof rawDeparmentId === "string" ? rawDeparmentId.trim() : "";
 
             const status =
                 typeof rawStatus === "string" && allowedStatus.includes(rawStatus.trim())
                     ? rawStatus.trim()
                     : null;
 
-            const sanitizedFilter = { startDate, endDate, designation, status };
+            const sanitizedFilter = { startDate, endDate, departmentId, status };
+            console.log("filters", sanitizedFilter);
 
             const result = await hrServices.getEmployeesStats(companyId, hrId, sanitizedFilter);
 
-            socket.emit("hr/dashboard/get-employee-stats-response", result);
+            socket.emit("hrm/employees/get-employee-stats-response", result);
         } catch (error) {
-            socket.emit("hr/dashboard/get-employee-stats-response", {
+            socket.emit("hrm/employees/get-employee-stats-response", {
                 done: false,
                 error: error.message || "Unexpected error fetching employee stats",
             });
@@ -530,7 +588,7 @@ const hrDashboardController = (socket, io) => {
             }
 
             socket.emit("hrm/designations/get-response", result);
-            // console.log("[hrm/designations/get] Response emitted");
+            console.log("[hrm/designations/get] Response emitted");
         } catch (error) {
             console.error("[hrm/designations/get] Error:", error);
             socket.emit("hrm/designations/get-response", {
@@ -624,6 +682,76 @@ const hrDashboardController = (socket, io) => {
             });
         }
     });
+
+    // crud ops on employee
+
+    socket.on("hrm/employees/add", withRateLimit(async (data) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data) {
+                throw new Error("Employee data is required");
+            }
+
+            const { employeeData, permissionsData } = data;
+
+            if (!employeeData || typeof employeeData !== "object") {
+                throw new Error("Invalid or missing employeeData");
+            }
+
+            if (!permissionsData || typeof permissionsData !== "object") {
+                throw new Error("Invalid or missing permissionsData");
+            }
+
+            // Merge enabledModules & permissions into employeeData for validation convenience
+            const mergedData = {
+                ...employeeData,
+                enabledModules: permissionsData.enabledModules,
+                permissions: permissionsData.permissions,
+            };
+
+            const validationError = validateEmployeeData(mergedData);
+
+            if (validationError) {
+                throw new Error(validationError);
+            }
+
+            const response = await hrmEmployee.addEmployee(companyId, hrId, employeeData, permissionsData);
+
+            socket.emit("hrm/employees/add-response", response);
+        } catch (error) {
+            console.error("Error in hrm/employees/add:", error);
+            socket.emit("hrm/employees/add-response", {
+                done: false,
+                error: error.message || "Unexpected error adding employee",
+            });
+        }
+    }));
+
+    socket.on("hrm/employees/delete", withRateLimit(async (data) => {
+        try {
+
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data || typeof data !== "object") {
+                throw new Error("Invalid payload");
+            }
+
+            const employeeId = typeof data._id === "string" ? data._id.trim() : "";
+            if (!employeeId) {
+                throw new Error("Employee Id is required for deletion");
+            }
+
+            const result = await hrServices.deleteEmployee(companyId, hrId, employeeId);
+            socket.emit("hrm/employees/delete-response", result);
+            io.emit('hrm/employees/delete', data);
+        } catch (error) {
+            socket.emit("hrm/employees/delete-response", {
+                done: false,
+                error: error.message || "Unexpected error deleting policy",
+            });
+        }
+    }));
 
 
 }
