@@ -68,10 +68,8 @@ export const getTenantCollections = (tenantDbName) => {
     hr: db.collection("hr"),   
     permissions:  db.collection("permissions"),
     policy: db.collection("policy"),
-    designations: db.collection("designation"),
+    designations: db.collection("designations"),
     assets: db.collection("assets"),
-
-
   };
 };
 

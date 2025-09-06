@@ -13,6 +13,9 @@ import { useSocket } from "../../../SocketContext";
 import { Socket } from "socket.io-client";
 import { toast, ToastContainer } from "react-toastify";
 import Designations from './designations';
+import { format } from 'date-fns';
+import moment from 'moment';
+import { companyName } from '../../../core/common/selectoption/selectoption';
 
 interface Department {
   _id: string;
@@ -21,6 +24,7 @@ interface Department {
 
 interface Designation {
   _id: string;
+  departmentId: string;
   designation: string;
 }
 
@@ -34,15 +38,23 @@ interface Employee {
   employeeId: string;
   firstName: string;
   lastName: string;
-  userName: string;
-  email: string;
-  company: string;
-  phone: string;
-  designation: string;
-  department: string;
-  status: 'active' | 'inactive';
-  joiningDate: string;
+  avatarUrl: string;
+  account: {
+    userName: string;
+  },
+  contact: {
+    email: string;
+    phone: string;
+  },
+  companyName: string;
+  departmentId: string;
+  designationId: string;
+  status: 'Active' | 'Inactive';
+  dateOfJoining: string;
   about: string;
+  role: string;
+  enabledModules: Record<PermissionModule, boolean>;
+  permissions: Record<PermissionModule, PermissionSet>;
 }
 
 interface EmployeeStats {
@@ -50,11 +62,6 @@ interface EmployeeStats {
   activeCount: number;
   inactiveCount: number;
   newJoinersCount: number;
-}
-
-interface GetEmployeesStatsSuccess {
-  stats: EmployeeStats;
-  employees: Employee[];
 }
 
 // Helper Functions
@@ -157,12 +164,16 @@ const EmployeeList = () => {
     avatarUrl: "",
     firstName: "",
     lastName: "",
-    joiningDate: "",
-    email: "",
-    userName: "",
-    password: "",
-    phone: "",
-    company: "",
+    dateOfJoining: "",
+    contact: {
+      email: "",
+      phone: "",
+    },
+    account: {
+      userName: "",
+      password: "",
+    },
+    companyName: "",
     designationId: "",
     departmentId: "",
     about: "",
@@ -209,21 +220,39 @@ const EmployeeList = () => {
       if (!isMounted) return;
 
       if (response.done && Array.isArray(response.data)) {
+        console.log("Designations response:", response);
+
+        // Map all designations from the response
         const mappedDesignations = response.data.map((d: Designation) => ({
           value: d._id,
           label: d.designation,
         }));
+
         setDesignation([
           { value: '', label: 'Select' },
           ...mappedDesignations,
         ]);
+
+        // If we're editing and the designation exists in the new list, keep it selected
+        if (editingEmployee?.designationId) {
+          const designationExists = response.data.some(
+            (d: Designation) => d._id === editingEmployee.designationId
+          );
+          if (!designationExists) {
+            setSelectedDesignation("");
+            setEditingEmployee(prev =>
+              prev ? { ...prev, designationId: "" } : prev
+            );
+          }
+        }
+
         setError(null);
         setLoading(false);
       } else {
         setError(response.error || "Failed to get designations");
         setLoading(false);
       }
-    }
+    };
 
     const handleDepartmentResponse = (response: any) => {
       if (!isMounted) return;
@@ -249,7 +278,8 @@ const EmployeeList = () => {
       if (!isMounted) return;
 
       if (response.done) {
-        if (response.data) {
+        console.log(response);
+        if (response.data.stats) {
           setStats(response.data.stats);
         }
         if (Array.isArray(response.data.employees)) {
@@ -279,11 +309,46 @@ const EmployeeList = () => {
       }
     }
 
+    const handleUpdateEmployeeResponse = (response: any) => {
+      if (response.done) {
+        // toast.success("Employee updated successfully!");
+        // Optionally refresh employee list
+        if (socket) {
+          socket.emit("hrm/employees/get-employee-stats");
+        }
+        setEditingEmployee(null); // Close modal or reset editing state
+        setError(null);
+        setLoading(false);
+      } else {
+        // toast.error(response.error || "Failed to update employee.");
+        setError(response.error || "Failed to update employee.");
+        setLoading(false);
+      }
+    };
+
+    const handleUpdatePermissionResponse = (response: any) => {
+      if (response.done) {
+        // toast.success("Employee permissions updated successfully!");
+        // Optionally refresh employee list or permissions
+        if (socket) {
+          socket.emit("hrm/employees/get-employee-stats");
+        }
+        setError(null);
+        setLoading(false);
+      } else {
+        // toast.error(response.error || "Failed to update permissions.");
+        setError(response.error || "Failed to update permissions.");
+        setLoading(false);
+      }
+    };
+
     socket.on("hrm/employees/add-response", handleAddEmployeeResponse);
     socket.on("hrm/designations/get-response", handleDesignationResponse);
     socket.on("hr/departments/get-response", handleDepartmentResponse);
     socket.on("hrm/employees/get-employee-stats-response", handleEmployeeResponse);
     socket.on("hrm/employees/delete-response", handleEmployeeDelete);
+    socket.on("hrm/employees/update-response", handleUpdateEmployeeResponse);
+    socket.on("hrm/employees/update-permissions-response", handleUpdatePermissionResponse);
 
     return () => {
       isMounted = false;
@@ -293,11 +358,34 @@ const EmployeeList = () => {
       socket.off("hr/departments/get-response", handleDepartmentResponse);
       socket.off("hrm/employees/get-employee-stats-response", handleEmployeeResponse);
       socket.off("hrm/employees/delete-response", handleEmployeeDelete);
+      socket.off("hrm/employees/update-response", handleUpdateEmployeeResponse);
+      socket.off("hrm/employees/update-permissions-response", handleUpdatePermissionResponse);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
 
-  console.log("Stats", stats);
+  useEffect(() => {
+    if (editingEmployee && socket) {
+      // Fetch designations for the employee's department
+      console.log("Emitting for departmentID", editingEmployee.departmentId);
+
+      if (editingEmployee.departmentId) {
+        socket.emit("hrm/designations/get", { departmentId: editingEmployee.departmentId });
+      }
+    }
+  }, [editingEmployee, socket]);
+
+  useEffect(() => {
+    if (editingEmployee && editingEmployee.permissions) {
+      setPermissions({
+        enabledModules: { ...initialState.enabledModules, ...editingEmployee.enabledModules },
+        permissions: { ...initialState.permissions, ...editingEmployee.permissions },
+        selectAll: { ...initialState.selectAll }, // reset or compute based on editingEmployee.permissions if needed
+      });
+    } else {
+      setPermissions(initialState);
+    }
+  }, [editingEmployee]);
 
   const data = employee_list_details;
   const columns = [
@@ -348,12 +436,12 @@ const EmployeeList = () => {
     },
     {
       title: "Email",
-      dataIndex: "email",
+      dataIndex: ["contact", "email"],
       sorter: (a: any, b: any) => a.Email.length - b.Email.length,
     },
     {
       title: "Phone",
-      dataIndex: "phone",
+      dataIndex: ["contact", "phone"],
       sorter: (a: any, b: any) => a.Phone.length - b.Phone.length,
     },
     {
@@ -366,9 +454,9 @@ const EmployeeList = () => {
     },
     {
       title: "Joining Date",
-      dataIndex: "joiningDate",
+      dataIndex: "dateOfJoining",
       sorter: (a: any, b: any) =>
-        new Date(a.joiningDate).getTime() - new Date(b.joiningDate).getTime(),
+        new Date(a.dateOfJoining).getTime() - new Date(b.dateOfJoining).getTime(),
       render: (date: string | Date) => {
         if (!date) return "-";
         const d = new Date(date);
@@ -383,7 +471,7 @@ const EmployeeList = () => {
       title: "Status",
       dataIndex: "status",
       render: (text: string, record: any) => (
-        <span className={`badge ${text === 'active' ? 'badge-success' : 'badge-danger'} d-inline-flex align-items-center badge-xs`}>
+        <span className={`badge ${text === 'Active' ? 'badge-success' : 'badge-danger'} d-inline-flex align-items-center badge-xs`}>
           <i className="ti ti-point-filled me-1" />
           {text}
         </span>
@@ -413,9 +501,7 @@ const EmployeeList = () => {
       ),
     },
   ]
-
-  console.log("Employees", employees);
-
+  console.log("Editing employee", editingEmployee);
 
   const [passwordVisibility, setPasswordVisibility] = useState({
     password: false,
@@ -425,9 +511,26 @@ const EmployeeList = () => {
   // Helper functions
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    if (name === "email" || name === "phone") {
+      setFormData(prev => ({
+        ...prev,
+        contact: {
+          ...prev.contact,
+          [name]: value
+        }
+      }));
+    } else if (name === "userName" || name === "password") {
+      setFormData(prev => ({
+        ...prev,
+        account: {
+          ...prev.account,
+          [name]: value
+        }
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
-
   const onSelectStatus = (status: string) => {
     if (!status) return;
     setSelectedStatus(status);
@@ -436,7 +539,6 @@ const EmployeeList = () => {
 
   const onSelectDepartment = (id: string) => {
     console.log(id);
-
     applyFilters({ departmentId: id });
   };
 
@@ -533,7 +635,7 @@ const EmployeeList = () => {
 
   // Handle date change
   const handleDateChange = (date: string) => {
-    setFormData(prev => ({ ...prev, joiningDate: date }));
+    setFormData(prev => ({ ...prev, dateOfJoining: date }));
   };
 
   // Handle select dropdown changes
@@ -756,16 +858,29 @@ const EmployeeList = () => {
   // Validate form before submission
   const validateForm = (): boolean => {
     // Check required fields
-    const requiredFields = ['firstName', 'email', 'userName', 'password', 'phone'];
-    for (const field of requiredFields) {
-      if (!formData[field as keyof typeof formData]) {
-        alert(`Please fill in ${field}`);
-        return false;
-      }
+    if (!formData.firstName) {
+      alert("Please fill in first name");
+      return false;
+    }
+    if (!formData.contact.email) {
+      alert("Please fill in email");
+      return false;
+    }
+    if (!formData.account.userName) {
+      alert("Please fill in username");
+      return false;
+    }
+    if (!formData.account.password) {
+      alert("Please fill in password");
+      return false;
+    }
+    if (!formData.contact.phone) {
+      alert("Please fill in phone");
+      return false;
     }
 
     // Check password match
-    if (formData.password !== confirmPassword) {
+    if (formData.account.password !== confirmPassword) {
       alert("Passwords don't match!");
       return false;
     }
@@ -796,12 +911,16 @@ const EmployeeList = () => {
         avatarUrl,
         firstName,
         lastName,
-        joiningDate,
-        email,
-        userName,
-        password,
-        phone,
-        company,
+        dateOfJoining,
+        contact: {
+          email,
+          phone,
+        },
+        account: {
+          userName,
+          password,
+        },
+        companyName,
         departmentId,
         designationId,
         about,
@@ -812,12 +931,16 @@ const EmployeeList = () => {
         avatarUrl,
         firstName,
         lastName,
-        joiningDate,
-        email,
-        userName,
-        password,
-        phone,
-        company,
+        dateOfJoining,
+        account: {
+          userName,
+          password,
+        },
+        contact: {
+          email,
+          phone,
+        },
+        companyName,
         departmentId,
         designationId,
         about,
@@ -836,11 +959,14 @@ const EmployeeList = () => {
 
       if (socket) {
         socket.emit("hrm/employees/add", submissionData);
+        handleResetFormData();
+        setActiveTab('basic-info');
       } else {
         console.log("Socket connection is not available");
         setError("Socket connection is not available.");
         setLoading(false);
       }
+
     } catch (error) {
       console.error("Error submitting form and permissions:", error);
       setError("An error occurred while submitting data.");
@@ -848,18 +974,88 @@ const EmployeeList = () => {
     setLoading(false);
   };
 
+  // 1. Update basic info
+  const handleUpdateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEmployee) {
+      toast.error("No employee selected for editing.");
+      return;
+    }
+    const payload = {
+      employeeId: editingEmployee.employeeId,
+      firstName: editingEmployee.firstName,
+      lastName: editingEmployee.lastName,
+      account: {
+        userName: editingEmployee.account.userName,
+      },
+      contact: {
+        email: editingEmployee.contact.email,
+        phone: editingEmployee.contact.phone,
+      },
+      company: editingEmployee.companyName || editingEmployee.companyName,
+      departmentId: editingEmployee.departmentId,
+      designationId: editingEmployee.designationId,
+      dateOfJoining: editingEmployee.dateOfJoining,
+      about: editingEmployee.about,
+      avatarUrl: editingEmployee.avatarUrl,
+      status: editingEmployee.status,
+    };
+    console.log("update payload", payload);
+
+    if (socket) {
+      socket.emit("hrm/employees/update", payload);
+      toast.success("Employee update request sent.");
+    } else {
+      toast.error("Socket connection is not available.");
+    }
+  };
+
+  // 2. Update permissions
+  const handlePermissionUpdateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log("****he****");
+
+    if (!editingEmployee) {
+      console.log("****he**-**");
+      toast.error("No employee selected for editing.");
+      return;
+    }
+    const payload = {
+      employeeId: editingEmployee._id,
+      permissions: permissions.permissions,
+      enabledModules: permissions.enabledModules,
+    };
+    console.log("****he****");
+
+    console.log("edit perm payload", payload);
+
+    if (socket) {
+      socket.emit("hrm/employees/update-permissions", payload);
+      // toast.success("Employee permissions update request sent.");
+      setPermissions(initialState);
+    } else {
+      console.log(error);
+      return;
+      // toast.error("Socket connection is not available.");
+    }
+  };
+  console.log("editing employee", editingEmployee)
   const handleResetFormData = () => {
     setFormData({
       employeeId: generateId("EMP"),
       avatarUrl: "",
       firstName: "",
       lastName: "",
-      joiningDate: "",
-      email: "",
-      userName: "",
-      password: "",
-      phone: "",
-      company: "",
+      dateOfJoining: "",
+      contact: {
+        email: "",
+        phone: "",
+      },
+      account: {
+        userName: "",
+        password: "",
+      },
+      companyName: "",
       departmentId: "",
       designationId: "",
       about: "",
@@ -886,6 +1082,12 @@ const EmployeeList = () => {
 
     // After successful save:
     setActiveTab("address");
+  };
+
+  const allPermissionsSelected = () => {
+    return MODULES.every(module =>
+      ACTIONS.every(action => permissions.permissions[module][action])
+    );
   };
 
   return (
@@ -1378,8 +1580,8 @@ const EmployeeList = () => {
                               }}
                               getPopupContainer={getModalContainer}
                               placeholder="DD-MM-YYYY"
-                              name="joiningDate"
-                              value={formData.joiningDate}
+                              name="dateOfJoining"
+                              value={formData.dateOfJoining}
                               onChange={handleDateChange}
                             />
                             <span className="input-icon-addon">
@@ -1395,7 +1597,7 @@ const EmployeeList = () => {
                           </label>
                           <input type="text" className="form-control"
                             name="userName"
-                            value={formData.userName}
+                            value={formData.account.userName}
                             onChange={handleChange} />
                         </div>
                       </div>
@@ -1406,7 +1608,7 @@ const EmployeeList = () => {
                           </label>
                           <input type="email" className="form-control"
                             name="email"
-                            value={formData.email}
+                            value={formData.contact.email}
                             onChange={handleChange} />
                         </div>
                       </div>
@@ -1424,7 +1626,7 @@ const EmployeeList = () => {
                               }
                               className="pass-input form-control"
                               name="password"
-                              value={formData.password}
+                              value={formData.account.password}
                               onChange={handleChange}
                             />
                             <span
@@ -1475,7 +1677,7 @@ const EmployeeList = () => {
                           </label>
                           <input type="text" className="form-control"
                             name="phone"
-                            value={formData.phone}
+                            value={formData.contact.phone}
                             onChange={handleChange} />
                         </div>
                       </div>
@@ -1485,8 +1687,8 @@ const EmployeeList = () => {
                             Company<span className="text-danger"> *</span>
                           </label>
                           <input type="text" className="form-control"
-                            name="company"
-                            value={formData.company}
+                            name="companyName"
+                            value={formData.companyName}
                             onChange={handleChange} />
                         </div>
                       </div>
@@ -1504,7 +1706,7 @@ const EmployeeList = () => {
                                 setDesignation([{ value: '', label: 'Select' }]);
                                 handleSelectChange('designationId', '');
                                 if (socket) {
-                                  socket.emit("hrm/designations/get", { department: option.value });
+                                  socket.emit("hrm/designations/get", { departmentId: option.value });
                                 }
                               }
                             }}
@@ -1594,7 +1796,6 @@ const EmployeeList = () => {
                         </div>
                       </div>
                     </div>
-
                     <div className="table-responsive border rounded">
                       <table className="table">
                         <tbody>
@@ -1725,11 +1926,19 @@ const EmployeeList = () => {
                       <div className="col-md-12">
                         <div className="d-flex align-items-center flex-wrap row-gap-3 bg-light w-100 rounded p-3 mb-4">
                           <div className="d-flex align-items-center justify-content-center avatar avatar-xxl rounded-circle border border-dashed me-2 flex-shrink-0 text-dark frames">
-                            <ImageWithBasePath
-                              src="assets/img/users/user-13.jpg"
-                              alt="img"
-                              className="rounded-circle"
-                            />
+                            {editingEmployee?.avatarUrl ? (
+                              <img
+                                src={editingEmployee.avatarUrl}
+                                alt="Profile"
+                                className="avatar avatar-xxl rounded-circle border border-dashed me-2 flex-shrink-0"
+                              />
+                            ) : (
+                              <ImageWithBasePath
+                                src="assets/img/users/user-13.jpg"
+                                alt="img"
+                                className="rounded-circle"
+                              />
+                            )}
                           </div>
                           <div className="profile-upload">
                             <div className="mb-2">
@@ -1742,15 +1951,60 @@ const EmployeeList = () => {
                                 <input
                                   type="file"
                                   className="form-control image-sign"
-                                  multiple
+                                  accept=".png,.jpeg,.jpg,.ico"
+                                  onChange={async (event) => {
+                                    const file = event.target.files?.[0];
+                                    if (!file) return;
+                                    const maxSize = 4 * 1024 * 1024;
+                                    if (file.size > maxSize) {
+                                      toast.error("File size must be less than 4MB.");
+                                      event.target.value = "";
+                                      return;
+                                    }
+                                    if (["image/jpeg", "image/png", "image/jpg", "image/ico"].includes(file.type)) {
+                                      try {
+                                        const formData = new FormData();
+                                        formData.append("file", file);
+                                        formData.append("upload_preset", "amasqis");
+                                        const res = await fetch(
+                                          "https://api.cloudinary.com/v1_1/dwc3b5zfe/image/upload",
+                                          { method: "POST", body: formData }
+                                        );
+                                        const data = await res.json();
+                                        setEditingEmployee(prev =>
+                                          prev ? { ...prev, avatarUrl: data.secure_url } : prev
+                                        );
+                                      } catch (error) {
+                                        toast.error("Failed to upload image. Please try again.");
+                                        event.target.value = "";
+                                      }
+                                    } else {
+                                      toast.error("Please upload image file only.");
+                                      event.target.value = "";
+                                    }
+                                  }}
+                                  style={{
+                                    cursor: "pointer",
+                                    opacity: 0,
+                                    position: "absolute",
+                                    top: 0,
+                                    left: 0,
+                                    width: "100%",
+                                    height: "100%",
+                                  }}
                                 />
                               </div>
-                              <Link
-                                to="#"
+                              <button
+                                type="button"
                                 className="btn btn-light btn-sm"
+                                onClick={() =>
+                                  setEditingEmployee(prev =>
+                                    prev ? { ...prev, avatarUrl: "" } : prev
+                                  )
+                                }
                               >
                                 Cancel
-                              </Link>
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -1776,6 +2030,7 @@ const EmployeeList = () => {
                           <input
                             type="text"
                             className="form-control"
+                            value={editingEmployee?.lastName || ""}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
                                 prev ? { ...prev, lastName: e.target.value } : prev)}
@@ -1803,15 +2058,16 @@ const EmployeeList = () => {
                           <div className="input-icon-end position-relative">
                             <DatePicker
                               className="form-control datetimepicker"
-                              format={{
-                                format: "DD-MM-YYYY",
-                                type: "mask",
-                              }}
+                              format="DD-MM-YYYY"
                               getPopupContainer={getModalContainer}
                               placeholder="DD-MM-YYYY"
-                              onChange={(date) =>
+                              name="dateOfJoining"
+                              value={editingEmployee && editingEmployee.dateOfJoining ? moment(editingEmployee.dateOfJoining) : null}
+                              onChange={date => {
                                 setEditingEmployee(prev =>
-                                  prev ? { ...prev, joiningDate: date ? date.format("YYYY-MM-DD") : "" } : prev)}
+                                  prev ? { ...prev, dateOfJoining: date ? date.toISOString() : "" } : prev
+                                );
+                              }}
                             />
                             <span className="input-icon-addon">
                               <i className="ti ti-calendar text-gray-7" />
@@ -1827,7 +2083,7 @@ const EmployeeList = () => {
                           <input
                             type="text"
                             className="form-control"
-                            value={editingEmployee?.userName}
+                            value={editingEmployee?.account.userName}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
                                 prev ? { ...prev, userName: e.target.value } : prev)}
@@ -1842,7 +2098,7 @@ const EmployeeList = () => {
                           <input
                             type="email"
                             className="form-control"
-                            value={editingEmployee?.email}
+                            value={editingEmployee?.contact.email}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
                                 prev ? { ...prev, email: e.target.value } : prev)}
@@ -1857,7 +2113,7 @@ const EmployeeList = () => {
                           <input
                             type="text"
                             className="form-control"
-                            value={editingEmployee?.phone}
+                            value={editingEmployee?.contact.phone}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
                                 prev ? { ...prev, phone: e.target.value } : prev)}
@@ -1872,7 +2128,7 @@ const EmployeeList = () => {
                           <input
                             type="text"
                             className="form-control"
-                            value={editingEmployee?.company}
+                            value={editingEmployee?.companyName}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
                                 prev ? { ...prev, company: e.target.value } : prev)}
@@ -1885,10 +2141,20 @@ const EmployeeList = () => {
                           <CommonSelect
                             className="select"
                             options={department}
-                            defaultValue={EMPTY_OPTION}
+                            defaultValue={department.find(dep => dep.value === editingEmployee?.departmentId) || { value: '', label: 'Select' }}
                             onChange={option => {
                               if (option) {
-                                handleSelectChange('departmentId', option.value);
+                                setSelectedDepartment(option.value);
+                                setEditingEmployee(prev =>
+                                  prev ? { ...prev, departmentId: option.value, designationId: "" } : prev
+                                );
+                                setSelectedDesignation("");
+                                if (socket && option.value) {
+                                  console.log("Fetching designations for department:", option.value);
+                                  socket.emit("hrm/designations/get", { departmentId: option.value });
+                                } else {
+                                  setDesignation([{ value: '', label: 'Select' }]);
+                                }
                               }
                             }}
                           />
@@ -1900,10 +2166,13 @@ const EmployeeList = () => {
                           <CommonSelect
                             className="select"
                             options={designation}
-                            defaultValue={EMPTY_OPTION}
+                            defaultValue={designation.find(dep => dep.value === editingEmployee?.designationId) || { value: '', label: 'Select' }}
                             onChange={option => {
                               if (option) {
-                                handleSelectChange('designationId', option.value);
+                                setSelectedDesignation(option.value);
+                                setEditingEmployee(prev =>
+                                  prev ? { ...prev, designationId: option.value } : prev
+                                );
                               }
                             }}
                           />
@@ -1934,8 +2203,8 @@ const EmployeeList = () => {
                     >
                       Cancel
                     </button>
-                    <button type="button" data-bs-dismiss="modal" className="btn btn-primary">
-                      Save{" "}
+                    <button type="button" data-bs-dismiss="modal" className="btn btn-primary" onClick={handleUpdateSubmit}>
+                      Save
                     </button>
                   </div>
                 </div>
@@ -1946,683 +2215,90 @@ const EmployeeList = () => {
                   aria-labelledby="address-tab2"
                   tabIndex={0}
                 >
+
                   <div className="modal-body">
                     <div className="card bg-light-500 shadow-none">
                       <div className="card-body d-flex align-items-center justify-content-between flex-wrap row-gap-3">
                         <h6>Enable Options</h6>
                         <div className="d-flex align-items-center justify-content-end">
+
+                          {/* Enable all Modules toggle */}
                           <div className="form-check form-switch me-2">
-                            <label className="form-check-label mt-0">
-                              <input
-                                className="form-check-input me-2"
-                                type="checkbox"
-                                role="switch"
-                              />
-                              Enable all Module
+                            <input
+                              id="enableAllModules"
+                              className="form-check-input me-2"
+                              type="checkbox"
+                              role="switch"
+                              checked={Object.values(permissions.enabledModules).every(Boolean)} // all enabled
+                              onChange={() => toggleAllModules(true)} // implement this to toggle all modules
+                            />
+                            <label className="form-check-label mt-0" htmlFor="enableAllModules">
+                              Enable all Modules
                             </label>
                           </div>
+
+                          {/* Select All - for all permissions across all modules (optional) */}
                           <div className="form-check d-flex align-items-center">
-                            <label className="form-check-label mt-0">
-                              <input
-                                className="form-check-input"
-                                type="checkbox"
-                                defaultChecked
-                              />
+                            <input
+                              id="selectAllPermissions"
+                              className="form-check-input"
+                              type="checkbox"
+                              checked={allPermissionsSelected()} // implement function to check if all permissions are enabled
+                              onChange={() => toggleGlobalSelectAll(true)} // toggle all permissions on/off
+                            />
+                            <label className="form-check-label mt-0" htmlFor="selectAllPermissions">
                               Select All
                             </label>
                           </div>
                         </div>
                       </div>
                     </div>
+
                     <div className="table-responsive border rounded">
                       <table className="table">
                         <tbody>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
+                          {MODULES.map((module) => (
+                            <tr key={module}>
+                              <td>
+                                <div className="form-check form-switch me-2">
                                   <input
+                                    id={`module-${module}`}
                                     className="form-check-input me-2"
                                     type="checkbox"
                                     role="switch"
-                                    defaultChecked
+                                    checked={permissions.enabledModules[module]}
+                                    onChange={() => toggleModule(module)}
                                   />
-                                  Holidays
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                    defaultChecked
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                    defaultChecked
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                  />
-                                  Leaves
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                  />
-                                  Clients
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                  />
-                                  Projects
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                  />
-                                  Tasks
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                  />
-                                  Chats
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                    defaultChecked
-                                  />
-                                  Assets
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                    defaultChecked
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                    defaultChecked
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>
-                              <div className="form-check form-switch me-2">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input me-2"
-                                    type="checkbox"
-                                    role="switch"
-                                  />
-                                  Timing Sheets
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Read
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Write
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Create
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Delete
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Import
-                                </label>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="form-check d-flex align-items-center">
-                                <label className="form-check-label mt-0">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                  />
-                                  Export
-                                </label>
-                              </div>
-                            </td>
-                          </tr>
+                                  <label className="form-check-label mt-0" htmlFor={`module-${module}`}>
+                                    {module.charAt(0).toUpperCase() + module.slice(1)}
+                                  </label>
+                                </div>
+                              </td>
+
+                              {ACTIONS.map((action) => (
+                                <td key={action} className="align-middle">
+                                  <div className="form-check d-flex align-items-center justify-content-center">
+                                    <input
+                                      id={`perm-${module}-${action}`}
+                                      className="form-check-input"
+                                      type="checkbox"
+                                      checked={permissions.permissions[module][action]}
+                                      onChange={(e) =>
+                                        handlePermissionChange(module, action, e.target.checked)
+                                      }
+                                      disabled={!permissions.enabledModules[module]}
+                                    />
+                                    <label
+                                      className="form-check-label mt-0 ms-1"
+                                      htmlFor={`perm-${module}-${action}`}
+                                    >
+                                      {action.charAt(0).toUpperCase() + action.slice(1)}
+                                    </label>
+                                  </div>
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -2640,6 +2316,7 @@ const EmployeeList = () => {
                       className="btn btn-primary"
                       data-bs-toggle="modal" data-inert={true}
                       data-bs-target="#success_modal"
+                      onClick={handlePermissionUpdateSubmit}
                     >
                       Save{" "}
                     </button>
@@ -2648,8 +2325,8 @@ const EmployeeList = () => {
               </div>
             </form>
           </div>
-        </div>
-      </div>
+        </div >
+      </div >
       {/* /Edit Employee */}
       {/* Add Employee Success */}
       <div className="modal fade" id="success_modal" role="dialog">

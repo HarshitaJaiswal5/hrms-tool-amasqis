@@ -4,23 +4,15 @@ import { getTenantCollections } from "../../config/db.js";
 
 export const addDesignation = async (companyId, hrId, payload) => {
     try {
-        console.log("HEllo");
-
         if (!companyId || !hrId || !payload) {
-            console.log("Helloe");
-
             return { done: false, error: "Missing required parameters" };
         }
         const collections = getTenantCollections(companyId);
-        console.log(Object.keys(collections));
-
         const hrExists = await collections.hr.countDocuments({
             _id: new ObjectId(hrId)
         });
         if (!hrExists) return { done: false, error: "HR not found" };
         if (!payload.designation || !payload.departmentId) {
-            console.log("Helo");
-
             return { done: false, error: "Designation and department are required" };
         }
         const existingDesignation = await collections.designations.findOne({
@@ -112,7 +104,7 @@ export const deleteDesignation = async (companyId, hrId, designationId) => {
     }
 };
 
-export const displayDesignations = async (companyId, hrId, filters = {}) => {
+export const displayDesignations = async (companyId, hrId, filters) => {
     try {
         if (!companyId || !hrId) {
             return { done: false, error: "Missing companyId or hrId" };
@@ -127,11 +119,12 @@ export const displayDesignations = async (companyId, hrId, filters = {}) => {
         
         // Handle departmentId filtering - works whether stored as String or ObjectId
         if (filters.departmentId) {
-            query.$or = [
-                { departmentId: new ObjectId(filters.departmentId) },
-                { departmentId: filters.departmentId }
-            ];
+            query.departmentId = filters.departmentId;
         }
+
+        console.log("Query from desingation", query);
+
+        console.log("Filters from desingation", filters);
 
         const pipeline = [
             { $match: query },

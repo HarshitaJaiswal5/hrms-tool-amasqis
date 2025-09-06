@@ -92,30 +92,36 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
     }
 
     const pipeline = [
-      { $match: query },
-      { $sort: { createdAt: -1 } },
+      { $match: query },  
+      { $sort: { createdAt: -1 } },  
       {
         $lookup: {
           from: "departments",
-          let: { deptId: "$departmentId" },
+          let: { deptId: "$_id" },  
           pipeline: [
-            { $match: { $expr: { $eq: ["$_id", "$$deptId"] } } },
-            { $project: { department: 1 } }
+            {
+              $match: {
+                $expr: {
+                  $eq: ["$_id", { $toObjectId: "$$deptId" }]  
+                }
+              }
+            },
+            { $project: { department: 1 } }  
           ],
           as: "departmentInfo"
         }
       },
-      { $unwind: "$departmentInfo" },
+      { $unwind: "$departmentInfo" }, 
       {
         $lookup: {
           from: "employees",
-          let: { departmentId: "$departmentId" },
+          let: { departmentId: "$_id" },  
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$departmentId", "$$departmentId"] },
+                    { $eq: ["$departmentId", { $toObjectId: "$$departmentId" }] },  // Convert for comparison
                     { $eq: ["$status", "active"] },
                   ],
                 },
@@ -127,16 +133,15 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
       },
       {
         $addFields: {
-          employeeCount: { $size: "$employees" },
-          departmentName: "$departmentInfo.department"
+          employeeCount: { $size: "$employees" },  
+          departmentName: "$departmentInfo.department" 
         }
       },
-      { $project: { employees: 0 } },
+
+      { $project: { employees: 0 } }, 
     ];
 
     const departments = await collections.departments.aggregate(pipeline).toArray();
-    console.log("departments", departments);
-
 
     return {
       done: true,

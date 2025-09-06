@@ -54,9 +54,8 @@ const hrDashboardController = (socket, io) => {
         }
 
         const requiredStringFields = [
-            "about", "avatarUrl", "company", "departmentId",
-            "designationId", "email", "employeeId", "firstName", "lastName",
-            "password", "phone", "userName"
+            "about", "avatarUrl", "companyName", "departmentId",
+            "designationId", "employeeId", "firstName", "lastName"
         ];
 
         for (const field of requiredStringFields) {
@@ -68,16 +67,39 @@ const hrDashboardController = (socket, io) => {
             }
         }
 
-        if (!("joiningDate" in data)) {
-            return "Missing required field: joiningDate";
+        // Validate nested account fields
+        if (!data.account || typeof data.account !== "object") {
+            return "Missing required field: account";
         }
-        const joiningDate = data.joiningDate;
-        if (typeof joiningDate !== "string" && !(joiningDate instanceof Date)) {
-            if (!joiningDate || typeof joiningDate.$d !== "object") {
-                return "joiningDate must be a string, Date object, or valid date wrapper";
+        if (typeof data.account.userName !== "string" || data.account.userName.trim() === "") {
+            return "Field 'account.userName' must be a non-empty string";
+        }
+        if (typeof data.account.password !== "string" || data.account.password.trim() === "") {
+            return "Field 'account.password' must be a non-empty string";
+        }
+
+        // Validate nested contact fields
+        if (!data.contact || typeof data.contact !== "object") {
+            return "Missing required field: contact";
+        }
+        if (typeof data.contact.email !== "string" || data.contact.email.trim() === "") {
+            return "Field 'contact.email' must be a non-empty string";
+        }
+        if (typeof data.contact.phone !== "string" || data.contact.phone.trim() === "") {
+            return "Field 'contact.phone' must be a non-empty string";
+        }
+
+        if (!("dateOfJoining" in data)) {
+            return "Missing required field: dateOfJoining";
+        }
+        const dateOfJoining = data.dateOfJoining;
+        if (typeof dateOfJoining !== "string" && !(dateOfJoining instanceof Date)) {
+            if (!dateOfJoining || typeof dateOfJoining.$d !== "object") {
+                return "dateOfJoining must be a string, Date object, or valid date wrapper";
             }
         }
 
+        // Validate permissions structure
         if (!isObject(data.enabledModules)) {
             return "enabledModules must be an object";
         }
@@ -102,6 +124,94 @@ const hrDashboardController = (socket, io) => {
             }
         }
 
+        return null;
+    };
+
+    const validateEmployeeBasicData = (data) => {
+        if (typeof data !== "object" || data === null) {
+            return "Employee data must be an object";
+        }
+        const requiredStringFields = [
+            "about", "avatarUrl", "companyName", "departmentId",
+            "designationId", "employeeId", "firstName", "lastName"
+        ];
+
+        for (const field of requiredStringFields) {
+            if (!(field in data)) {
+                return `Missing required field: ${field}`;
+            }
+            if (typeof data[field] !== "string" || data[field].trim() === "") {
+                return `Field '${field}' must be a non-empty string`;
+            }
+        }
+
+        if (!data.account || typeof data.account !== "object") {
+            return "Missing required field: account";
+        }
+        if (typeof data.account.userName !== "string" || data.account.userName.trim() === "") {
+            return "Field 'account.userName' must be a non-empty string";
+        }
+
+        if (!data.contact || typeof data.contact !== "object") {
+            return "Missing required field: contact";
+        }
+        if (typeof data.contact.email !== "string" || data.contact.email.trim() === "") {
+            return "Field 'contact.email' must be a non-empty string";
+        }
+        if (typeof data.contact.phone !== "string" || data.contact.phone.trim() === "") {
+            return "Field 'contact.phone' must be a non-empty string";
+        }
+
+        if (!("dateOfJoining" in data)) {
+            return "Missing required field: dateOfJoining";
+        }
+        const dateOfJoining = data.dateOfJoining;
+        if (typeof dateOfJoining !== "string" && !(dateOfJoining instanceof Date)) {
+            if (!dateOfJoining || typeof dateOfJoining.$d !== "object") {
+                return "dateOfJoining must be a string, Date object, or valid date wrapper";
+            }
+        }
+
+        return null;
+    };
+
+    const validatePermissionsData = (data) => {
+        // Helper function to check if a value is a plain object
+        const isObject = (value) => {
+            return typeof value === 'object' && value !== null && !Array.isArray(value);
+        };
+
+        // Validate enabledModules
+        if (!isObject(data.enabledModules)) {
+            return "enabledModules must be an object";
+        }
+
+        for (const [module, enabled] of Object.entries(data.enabledModules)) {
+            if (typeof enabled !== "boolean") {
+                return `enabledModules.${module} must be boolean`;
+            }
+        }
+
+        // Validate permissions
+        if (!isObject(data.permissions)) {
+            return "permissions must be an object";
+        }
+
+        const expectedActions = ["read", "write", "create", "delete", "import", "export"];
+
+        for (const [module, perms] of Object.entries(data.permissions)) {
+            if (!isObject(perms)) {
+                return `permissions.${module} must be an object`;
+            }
+
+            for (const action of expectedActions) {
+                if (typeof perms[action] !== "boolean") {
+                    return `permissions.${module}.${action} must be boolean`;
+                }
+            }
+        }
+
+        // If all validations pass
         return null;
     };
 
@@ -377,9 +487,9 @@ const hrDashboardController = (socket, io) => {
 
             const response = await hrmDepartment.addDepartment(companyId, hrId, payload);
             socket.emit("hr/departments/add-response", response);
-            if (socket) {
-                socket.emit("hr/departmentsStats/get", response);
-            }
+            // if (socket) {
+            //     socket.emit("hr/departmentsStats/get", response);
+            // }
         } catch (error) {
             socket.emit("hr/departments/add-response", {
                 done: false,
@@ -573,8 +683,8 @@ const hrDashboardController = (socket, io) => {
                         sanitizedFilters.status = statusTrim;
                     }
                 }
-                if (typeof filters.department === "string" && filters.department.trim() !== "") {
-                    sanitizedFilters.departmentId = filters.department.trim();
+                if (typeof filters.departmentId === "string" && filters.departmentId.trim() !== "") {
+                    sanitizedFilters.departmentId = filters.departmentId.trim();
                 }
             }
             console.log("[hrm/designations/get] Sanitized filters:", sanitizedFilters);
@@ -713,6 +823,8 @@ const hrDashboardController = (socket, io) => {
             const validationError = validateEmployeeData(mergedData);
 
             if (validationError) {
+                console.log("*****HELooozzzz");
+
                 throw new Error(validationError);
             }
 
@@ -753,6 +865,96 @@ const hrDashboardController = (socket, io) => {
         }
     }));
 
+    // Update Employee Basic Info
+    socket.on("hrm/employees/update", withRateLimit(async (data) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data || typeof data !== "object") {
+                throw new Error("Employee update data is required");
+            }
+
+            // You may want to validate here as well
+            const employeeId = typeof data.employeeId === "string" ? data.employeeId.trim() : "";
+            if (!employeeId) {
+                throw new Error("Employee ID is required for update");
+            }
+
+            // Optionally validate fields
+            const validationError = validateEmployeeBasicData(data);
+            if (validationError) throw new Error(validationError);
+
+            const response = await hrmEmployee.updateEmployeeDetails(companyId, hrId, data);
+
+            socket.emit("hrm/employees/update-response", response);
+        } catch (error) {
+            console.log(error);
+            socket.emit("hrm/employees/update-response", {
+                done: false,
+                error: error.message || "Unexpected error updating employee",
+            });
+        }
+    }));
+
+    // Update Employee Permissions
+    socket.on("hrm/employees/update-permissions", withRateLimit(async (data) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data || typeof data !== "object") {
+                throw new Error("Permissions update data is required");
+            }
+
+            const employeeId = typeof data.employeeId === "string" ? data.employeeId.trim() : "";
+            if (!employeeId) {
+                throw new Error("Employee ID is required for permissions update");
+            }
+            const validationError = validatePermissionsData(data);
+            if (validationError) throw new Error(validationError);
+
+            const permissionsPayload = {
+                enabledModules: data.enabledModules,
+                permissions: data.permissions
+            };
+
+            console.log("permissionPayload", permissionsPayload);
+
+            const response = await hrmEmployee.updatePermissions(companyId, hrId, employeeId, permissionsPayload);
+
+            socket.emit("hrm/employees/update-permissions-response", response);
+        } catch (error) {
+            console.log(error);
+            
+            socket.emit("hrm/employees/update-permissions-response", {
+                done: false,
+                error: error.message || "Unexpected error updating permissions",
+            });
+        }
+    }));
+
+    socket.on("hrm/employees/get-permissions", withRateLimit(async (data) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+
+            if (!data || typeof data !== "object") {
+                throw new Error("Permissions get data is required");
+            }
+
+            const employeeId = typeof data._id === "string" ? data._id.trim() : "";
+            if (!employeeId) {
+                throw new Error("Employee ID is required for permissions update");
+            }
+
+            const response = await hrmEmployee.getPermissions(companyId, hrId, employeeId);
+
+            socket.emit("hrm/employees/get-permissions-response", response);
+        } catch (error) {
+            socket.emit("hrm/employees/get-permissions-response", {
+                done: false,
+                error: error.message || "Unexpected error updating permissions",
+            });
+        }
+    }))
 
 }
 export default hrDashboardController;

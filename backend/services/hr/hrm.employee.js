@@ -13,7 +13,7 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
     });
 
     if (hrCount === 0) {
-      console.warn("⚠️ HR not found in specified company");
+      console.warn("HR not found in specified company");
       return { done: false, error: "HR not found in the specified company" };
     }
 
@@ -39,16 +39,15 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
     const pipeline = [
       {
         $addFields: {
-          joiningDate: { $toDate: "$joiningDate" }
+          dateOfJoining: { $toDate: "$dateOfJoining" }
         }
       },
-      // Apply base match & date range
       {
         $match: {
           ...baseMatch,
           ...(start || end
             ? {
-              joiningDate: {
+              dateOfJoining: {
                 ...(start ? { $gte: start } : {}),
                 ...(end ? { $lte: end } : {})
               }
@@ -62,7 +61,7 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
           localField: "designation",
           foreignField: "_id",
           as: "designationInfo",
-        },
+        }
       },
       {
         $lookup: {
@@ -70,31 +69,48 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
           localField: "department",
           foreignField: "_id",
           as: "departmentInfo",
-        },
+        }
       },
       {
         $addFields: {
           designationName: { $arrayElemAt: ["$designationInfo.name", 0] },
           departmentName: { $arrayElemAt: ["$departmentInfo.name", 0] },
-        },
+        }
+      },
+      {
+        $lookup: {
+          from: "permissions",
+          localField: "_id",
+          foreignField: "employeeId",
+          as: "permissionsInfo"
+        }
+      },
+      {
+        $addFields: {
+          employeeRecord: "$$ROOT"  // Wrap entire document
+        }
       },
       {
         $project: {
-          designationInfo: 0,
-          departmentInfo: 0,
-          // Keep only necessary fields
-        },
-      },
+          employeeRecord: 1,
+          permissionsInfo: 1
+        }
+      }
     ];
 
     // Get employees with populated names
-    const employees = await collections.employees.aggregate(pipeline).toArray();
+    let employees = await collections.employees.aggregate(pipeline).toArray();
 
-    if (employees.length > 0) {
-      console.log(employees[0].joiningDate);
-    } else {
-      console.log("No employees found");
-    }
+    employees = employees.map(emp => {
+      const { permissionsInfo, ...rest } = emp.employeeRecord;  // destructure to exclude old permissionInfo
+      const effectivePermissionsInfo = emp.permissionsInfo.length === 1 ? emp.permissionsInfo[0] : emp.permissionsInfo
+
+      return {
+        ...rest,
+        enabledModules: effectivePermissionsInfo.enabledModules,
+        permissions: effectivePermissionsInfo.permissions,
+      };
+    });
 
     // Get counts (not filtered — global stats)
     const [
@@ -104,10 +120,10 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
       newJoinersCount,
     ] = await Promise.all([
       collections.employees.countDocuments({}),
-      collections.employees.countDocuments({ status: "active" }),
-      collections.employees.countDocuments({ status: "inactive" }),
+      collections.employees.countDocuments({ status: "Active" }),
+      collections.employees.countDocuments({ status: "Inactive" }),
       collections.employees.countDocuments({
-        joiningDate: {
+        dateOfJoining: {
           $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
         },
       }),
@@ -135,7 +151,7 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
   }
 };
 
-export const updateEmployeeDetails = async (companyId, hrId, payload = {}) => {
+export const updateEmployeeDetails = async (companyId, hrId, payload) => {
   try {
     if (!companyId || !hrId) {
       return { done: false, error: "Missing required parameters" };
@@ -153,10 +169,14 @@ export const updateEmployeeDetails = async (companyId, hrId, payload = {}) => {
       return { done: false, error: "Employee ID is required" };
     }
 
-    const { _id, ...updateData } = payload;
+    // Remove _id from updateData if present
+    const { employeeId, ...updateData } = payload;
+
+    // Optionally, add updatedAt field
+    updateData.updatedAt = new Date();
 
     const result = await collections.employees.updateOne(
-      { _id: new ObjectId(_id) },
+      { employeeId: employeeId },
       { $set: updateData }
     );
 
@@ -255,8 +275,9 @@ export const getPermissions = async (companyId, hrId, employeeId) => {
   }
 };
 
-export const updatePermissions = async (companyId, hrId, employeeId, payload = {}) => {
+export const updatePermissions = async (companyId, hrId, employeeId, payload) => {
   try {
+    console.log("***************Update employee called*********");
     if (!companyId || !hrId || !employeeId) {
       return { done: false, error: "Missing required parameters" };
     }
@@ -278,26 +299,27 @@ export const updatePermissions = async (companyId, hrId, employeeId, payload = {
 
     const safePayload = payload || {};
     const updateData = {
-      enableAllModules: safePayload.enableAllModules ?? false,
-      modules: {
-        holidays: safePayload.modules?.holidays ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        leaves: safePayload.modules?.leaves ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        clients: safePayload.modules?.clients ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        projects: safePayload.modules?.projects ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        tasks: safePayload.modules?.tasks ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        chats: safePayload.modules?.chats ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        assets: safePayload.modules?.assets ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
-        timingSheets: safePayload.modules?.timingSheets ?? { read: false, write: false, create: false, delete: false, import: false, export: false }
+      enabledModules: safePayload.enabledModules ?? false,
+      permissions: {
+        holidays: safePayload.permissions?.holidays ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        leaves: safePayload.permissions?.leaves ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        clients: safePayload.permissions?.clients ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        projects: safePayload.permissions?.projects ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        tasks: safePayload.permissions?.tasks ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        chats: safePayload.permissions?.chats ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        assets: safePayload.permissions?.assets ?? { read: false, write: false, create: false, delete: false, import: false, export: false },
+        timingSheets: safePayload.permissions?.timingSheets ?? { read: false, write: false, create: false, delete: false, import: false, export: false }
       },
       updatedAt: new Date()
     };
+
+    updateData.updatedBy = new ObjectId(hrId);
 
     const result = await collections.permissions.updateOne(
       {
         employeeId: new ObjectId(employeeId),
       },
       { $set: updateData },
-      { upsert: true }
     );
 
     return {
@@ -366,57 +388,68 @@ export const addEmployee = async (companyId, hrId, employeeData, permissionsData
       return { done: false, error: "Missing companyId or hrId." };
     }
 
-    const requiredFields = [
-      "email", "firstName", "lastName", "userName",
-      "password", "phone", "company", "departmentId",
-      "designationId", "joiningDate"
-    ];
-    const missingFields = requiredFields.filter(
-      field => !employeeData[field] && employeeData[field] !== 0
-    );
-    if (missingFields.length > 0) {
-      return { done: false, error: `Missing required fields: ${missingFields.join(", ")}` };
-    }
+    // Validate required top-level fields
+    // const requiredFields = [
+    //   "account", "firstName", "lastName", "companyName", "departmentId", "designationId", "dateOfJoining"
+    // ];
+    // const missingFields = requiredFields.filter(
+    //   field => !employeeData[field] && employeeData[field] !== 0
+    // );
 
-    const hasProperPermissionsData =
-      permissionsData &&
-      typeof permissionsData === "object" &&
-      permissionsData.enabledModules &&
-      permissionsData.permissions &&
-      Object.keys(permissionsData.enabledModules).length > 0 &&
-      Object.keys(permissionsData.permissions).length > 0;
+    // // Validate required nested fields
+    // if (!employeeData.account?.userName) missingFields.push("account.userName");
+    // if (!employeeData.account?.password) missingFields.push("account.password");
+    // if (!employeeData.contact?.phone) missingFields.push("contact.phone");
+    // if (!employeeData.contact?.email) missingFields.push("contact.email");
 
-    if (!hasProperPermissionsData) {
-      return { done: false, error: "Missing or incomplete permissions data." };
-    }
+    // if (missingFields.length > 0) {
+    //   return { done: false, error: `Missing required fields: ${missingFields.join(", ")}` };
+    // }
+
+    // Validate permissions data
+    // const hasProperPermissionsData =
+    //   permissionsData &&
+    //   typeof permissionsData === "object" &&
+    //   permissionsData.enabledModules &&
+    //   permissionsData.permissions &&
+    //   Object.keys(permissionsData.enabledModules).length > 0 &&
+    //   Object.keys(permissionsData.permissions).length > 0;
+
+    // if (!hasProperPermissionsData) {
+    //   return { done: false, error: "Missing or incomplete permissions data." };
+    // }
 
     const collections = getTenantCollections(companyId);
 
+    // Check HR exists
     const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
     if (!hrExists) {
       return { done: false, error: "HR not found." };
     }
 
-    const emailExists = await collections.employees.countDocuments({ email: employeeData.email });
+    // Check email uniqueness (nested in contact)
+    const emailExists = await collections.employees.countDocuments({ "contact.email": employeeData.contact.email });
     if (emailExists) {
       return { done: false, error: "Employee email already exists." };
     }
 
+    // Hash password (nested in account)
     const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(employeeData.account.password, saltRounds);
 
-    if (!employeeData.password) {
-      return { done: false, error: "Password is required" };
-    }
-
-    const hashedPassword = await bcrypt.hash(employeeData.password, saltRounds);
-
-    const employeeResult = await collections.employees.insertOne({
+    // Prepare employee data for insertion
+    const employeeToInsert = {
       ...employeeData,
-      password: hashedPassword,
+      account: {
+        ...employeeData.account,
+        password: hashedPassword
+      },
       createdAt: new Date(),
       updatedAt: new Date(),
-      status: "active"
-    });
+      status: "Active"
+    };
+
+    const employeeResult = await collections.employees.insertOne(employeeToInsert);
 
     if (!employeeResult.insertedId) {
       return { done: false, error: "Failed to add employee." };
@@ -424,6 +457,7 @@ export const addEmployee = async (companyId, hrId, employeeData, permissionsData
 
     const employeeId = employeeResult.insertedId;
 
+    // Insert permissions
     const permissionsResult = await collections.permissions.insertOne({
       employeeId,
       enabledModules: permissionsData.enabledModules,
@@ -443,7 +477,6 @@ export const addEmployee = async (companyId, hrId, employeeData, permissionsData
       message: "Employee and permissions added successfully"
     };
   } catch (error) {
-    console.error("Error adding employee with permissions:", error);
     const errorMsg = error.message && error.message.includes("duplicate key")
       ? "Employee with same details already exists"
       : "Failed to add employee";
