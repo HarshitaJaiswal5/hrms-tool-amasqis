@@ -247,7 +247,7 @@ export const getEmployeeGridsStats = async (companyId, hrId, filters) => {
                       $expr: {
                         $in: [
                           "$$employeeIdStr",
-                          { $ifNull: ["$empMembers", []] } 
+                          { $ifNull: ["$empMembers", []] }
                         ]
                       }
                     }
@@ -1540,87 +1540,37 @@ export const getBankDetails = async (companyId, hrId, employeeId) => {
 
 ///// generic function
 
-export const getEmployeeInfo = async (companyId, hrId, employeeId, infoType) => {
-  const session = client.startSession();
+export const getEmployeeDetails = async (companyId, hrId, employeeId) => {
   try {
-    session.startTransaction();
-
-    if (!companyId || !hrId || !employeeId || !infoType) {
-      await session.abortTransaction();
+    if (!companyId || !hrId || !employeeId) {
       return { done: false, message: "Missing required parameters" };
-    }
-
-    const allowedTypes = [
-      'education',
-      'family',
-      'experience',
-      'assets',
-      'emergencyContacts',
-      'personal',
-      'statutory',
-    ];
-
-    if (!allowedTypes.includes(infoType)) {
-      await session.abortTransaction();
-      return {
-        done: false,
-        message: `Invalid infoType. Allowed: ${allowedTypes.join(', ')}`
-      };
     }
 
     const collections = getTenantCollections(companyId);
     const employeeObjId = new ObjectId(employeeId);
 
-    const hrExists = await collections.hr.countDocuments(
-      { _id: new ObjectId(hrId) },
-      { session }
-    );
+    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
 
     if (!hrExists) {
-      await session.abortTransaction();
       return { done: false, message: "HR not authorized" };
     }
 
     const employee = await collections.employees.findOne(
       { _id: employeeObjId },
-      {
-        [`+${infoType}`]: 1,
-        updatedAt: 1
-      },
-      { session }
     );
 
     if (!employee) {
-      await session.abortTransaction();
       return { done: false, message: "Employee not found" };
     }
-
-    let resultData;
-    if (infoType === 'assets' || infoType === 'emergencyContacts') {
-      resultData = employee[infoType] || [];
-    } else {
-      resultData = employee[infoType] || {};
-      if (Array.isArray(resultData)) {
-        resultData = resultData[0] || {};
-      }
-    }
-
-    await session.commitTransaction();
+    
     return {
       done: true,
-      data: {
-        [infoType]: resultData,
-        lastUpdated: employee.updatedAt
-      }
+      data: employee,
     };
-
   } catch (error) {
-    await session.abortTransaction();
     return {
       done: false,
       message: "Internal server error",
     };
-  } finally {
-    session.endSession();
   }
 };

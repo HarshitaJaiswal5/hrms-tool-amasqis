@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import PredefinedDateRanges from '../../../core/common/datePicker'
 import Table from "../../../core/common/dataTable/index";
 import { all_routes } from '../../router/all_routes';
@@ -8,9 +8,208 @@ import { employeereportDetails } from '../../../core/data/json/employeereportDet
 import { DatePicker, TimePicker } from "antd";
 import CommonSelect from '../../../core/common/commonSelect';
 import CollapseHeader from '../../../core/common/collapse-header/collapse-header';
+import { useSocket } from "../../../SocketContext";
+import { Socket } from "socket.io-client";
+import { toast, ToastContainer } from "react-toastify";
 type PasswordField = "password" | "confirmPassword";
 
+interface Passport {
+    number: string;
+    issueDate: string; // ISO date string
+    expiryDate: string; // ISO date string
+    country: string;
+}
+
+interface Address {
+    street: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+}
+
+interface PersonalInfo {
+    gender: string;
+    birthday: string; // ISO date string
+    maritalStatus: string;
+    religion: string;
+    employmentOfSpouse: boolean;
+    noOfChildren: number;
+    passport: Passport;
+    address: Address;
+}
+
+interface ContactInfo {
+    phone: string;
+    email: string;
+}
+
+interface AccountInfo {
+    userName: string;
+    password: string;
+}
+
+interface EmergencyContact {
+    name: string;
+    relation: string;
+    phone: string;
+    email: string;
+}
+
+interface BankInfo {
+    accountHolderName: string;
+    accountNumber: string;
+    bankName: string;
+    branch: string;
+    ifscCode: string;
+}
+
+interface FamilyInfo {
+    spouseName: string | null;
+    children: string[];
+    parents: {
+        father: string;
+        mother: string;
+    };
+}
+
+interface EducationEntry {
+    degree: string;
+    institution: string;
+    startYear: number;
+    endYear: number;
+    grade: string;
+}
+
+interface ExperienceEntry {
+    company: string;
+    designation: string;
+    startDate: string; // ISO date string
+    endDate: string; // ISO date string
+    responsibilities: string[];
+}
+
+interface Asset {
+    assetName: string;
+    serialNumber: string;
+    issuedDate: string; // ISO date string
+    status: string;
+    assignedBy: string;
+    assetImageUrl: string;
+    assigneeAvatar: string;
+}
+
+interface SalaryInfo {
+    basic: number;
+    hra: number;
+    allowance: number;
+    total: number;
+}
+
+interface PFInfo {
+    accountNumber: string;
+    contributionPercent: number;
+    employerContributionPercent: number;
+}
+
+interface ESIInfo {
+    number: string;
+    contributionPercent: number;
+    employerContributionPercent: number;
+}
+
+interface Statutory {
+    salary: SalaryInfo;
+    pf: PFInfo;
+    esi: ESIInfo;
+}
+
+export interface Employee {
+    _id: string;
+    employeeId: string;
+    firstName: string;
+    lastName: string;
+    dateOfJoining: string; // ISO date string
+    departmentId: string;
+    designation: string;
+    department: string;
+    role: string;
+    timeZone: string;
+    companyName: string;
+    about: string;
+    status: string;
+    reportOffice?: string;
+    managerId?: string;
+    leadId?: string;
+    avatar: string;
+    yearsOfExperience?: number;
+    contact: ContactInfo;
+    personal: PersonalInfo;
+    account: AccountInfo;
+    emergencyContacts: EmergencyContact[];
+    bank: BankInfo;
+    family: FamilyInfo;
+    education: EducationEntry[];
+    experience: ExperienceEntry[];
+    assets: Asset[];
+    statutory: Statutory;
+    updatedBy: string;
+    designationId: string;
+    avatarUrl: string;
+    clientId: string;
+}
+
 const EmployeeDetails = () => {
+    const { employeeId } = useParams();
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [employee, setEmployee] = useState<Employee | null>(null);
+    const socket = useSocket() as Socket | null;
+
+    useEffect(() => {
+        if (!socket) return;
+
+        let isMounted = true;
+
+        setLoading(true);
+
+        const timeoutId = setTimeout(() => {
+            if (loading && isMounted) {
+                console.warn("Employees loading timeout - showing fallback");
+                setError("Employees loading timed out. Please refresh the page.");
+                setLoading(false);
+            }
+        }, 30000);
+
+        const payload = {
+            employeeId: employeeId,
+        }
+        socket.emit("hrm/employees/get-details", payload);
+
+        const handleDetailsResponse = (response: any) => {
+            if (!isMounted) return;
+
+            if (response.done) {
+                setEmployee(response.data);
+                setError(null);
+                setLoading(false);
+            } else {
+                console.log(error);
+
+                setError(response.error || "Failed to add policy");
+                setLoading(false);
+            }
+        };
+        socket.on("hrm/employees/get-details-response", handleDetailsResponse);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timeoutId);
+            socket.off("hrm/employees/get-details-response", handleDetailsResponse);
+        };
+    }, [socket]);
+
+    console.log("Employee from fetched", employee);
 
     const [passwordVisibility, setPasswordVisibility] = useState({
         password: false,
@@ -127,6 +326,21 @@ const EmployeeDetails = () => {
         { value: "Maternity Benefit ", label: "Maternity Benefit " },
     ];
 
+    function formatDate(isoDateString?: string) {
+        if (!isoDateString) return ""; // handle undefined or empty
+
+        const date = new Date(isoDateString);
+        if (isNaN(date.getTime())) return "";
+
+        const day = date.getDate();
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const month = monthNames[date.getMonth()];
+        const year = date.getFullYear();
+
+        return `${day} ${month} ${year}`;
+    }
+
     return (
         <>
             {/* Page Wrapper */}
@@ -166,7 +380,7 @@ const EmployeeDetails = () => {
                                 <div className="card-body p-0">
                                     <span className="avatar avatar-xl avatar-rounded border border-2 border-white m-auto d-flex mb-2">
                                         <ImageWithBasePath
-                                            src="assets/img/users/user-13.jpg"
+                                            src={employee?.avatarUrl || "assets/img/users/user-13.jpg"}
                                             className="w-auto h-auto"
                                             alt="Img"
                                         />
@@ -174,15 +388,16 @@ const EmployeeDetails = () => {
                                     <div className="text-center px-3 pb-3 border-bottom">
                                         <div className="mb-3">
                                             <h5 className="d-flex align-items-center justify-content-center mb-1">
-                                                Stephan Peralt
+                                                {employee?.firstName} {employee?.lastName}
                                                 <i className="ti ti-discount-check-filled text-success ms-1" />
                                             </h5>
                                             <span className="badge badge-soft-dark fw-medium me-2">
                                                 <i className="ti ti-point-filled me-1" />
-                                                Software Developer
+                                                {employee?.role}
                                             </span>
                                             <span className="badge badge-soft-secondary fw-medium">
-                                                10+ years of Experience
+                                                 <i className="ti ti-point-filled me-1" />
+                                                Years of Experience: {employee?.yearsOfExperience || '-'}
                                             </span>
                                         </div>
                                         <div>
@@ -191,21 +406,14 @@ const EmployeeDetails = () => {
                                                     <i className="ti ti-id me-2" />
                                                     Client ID
                                                 </span>
-                                                <p className="text-dark">CLT-0024</p>
-                                            </div>
-                                            <div className="d-flex align-items-center justify-content-between mb-2">
-                                                <span className="d-inline-flex align-items-center">
-                                                    <i className="ti ti-star me-2" />
-                                                    Team
-                                                </span>
-                                                <p className="text-dark">UI/UX Design</p>
+                                                <p className="text-dark">{employee?.clientId || '-'}</p>
                                             </div>
                                             <div className="d-flex align-items-center justify-content-between mb-2">
                                                 <span className="d-inline-flex align-items-center">
                                                     <i className="ti ti-calendar-check me-2" />
                                                     Date Of Join
                                                 </span>
-                                                <p className="text-dark">1st Jan 2023</p>
+                                                <p className="text-dark">{formatDate(employee?.dateOfJoining) || '-'}</p>
                                             </div>
                                             <div className="d-flex align-items-center justify-content-between">
                                                 <span className="d-inline-flex align-items-center">
@@ -213,13 +421,13 @@ const EmployeeDetails = () => {
                                                     Report Office
                                                 </span>
                                                 <div className="d-flex align-items-center">
-                                                    <span className="avatar avatar-sm avatar-rounded me-2">
+                                                    {/* <span className="avatar avatar-sm avatar-rounded me-2">
                                                         <ImageWithBasePath
                                                             src="assets/img/profiles/avatar-12.jpg"
                                                             alt="Img"
                                                         />
-                                                    </span>
-                                                    <p className="text-gray-9 mb-0">Doglas Martini</p>
+                                                    </span> */}
+                                                    <p className="text-gray-9 mb-0">{employee?.reportOffice}</p>
                                                 </div>
                                             </div>
                                             <div className="row gx-2 mt-3">
@@ -264,7 +472,7 @@ const EmployeeDetails = () => {
                                                 <i className="ti ti-phone me-2" />
                                                 Phone
                                             </span>
-                                            <p className="text-dark">(163) 2459 315</p>
+                                            <p className="text-dark">{employee?.contact?.phone || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
@@ -275,7 +483,7 @@ const EmployeeDetails = () => {
                                                 to="#"
                                                 className="text-info d-inline-flex align-items-center"
                                             >
-                                                perralt12@example.com
+                                                {employee?.contact?.email || '-'}
                                                 <i className="ti ti-copy text-dark ms-2" />
                                             </Link>
                                         </div>
@@ -284,14 +492,14 @@ const EmployeeDetails = () => {
                                                 <i className="ti ti-gender-male me-2" />
                                                 Gender
                                             </span>
-                                            <p className="text-dark text-end">Male</p>
+                                            <p className="text-dark text-end">{employee?.personal?.gender || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-cake me-2" />
                                                 Birdthday
                                             </span>
-                                            <p className="text-dark text-end">24th July 2000</p>
+                                            <p className="text-dark text-end">{formatDate(employee?.personal?.birthday) || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between">
                                             <span className="d-inline-flex align-items-center">
@@ -299,7 +507,7 @@ const EmployeeDetails = () => {
                                                 Address
                                             </span>
                                             <p className="text-dark text-end">
-                                                1861 Bayonne Ave, <br /> Manchester, NJ, 08759
+                                                {employee?.personal?.address?.street} {employee?.personal?.address?.city || '-'} <br /> {employee?.personal?.address?.state || '-'} {employee?.personal?.address?.country || '-'} {employee?.personal?.address?.postalCode || '-'}
                                             </p>
                                         </div>
                                     </div>
@@ -320,49 +528,49 @@ const EmployeeDetails = () => {
                                                 <i className="ti ti-e-passport me-2" />
                                                 Passport No
                                             </span>
-                                            <p className="text-dark">QRET4566FGRT</p>
+                                            <p className="text-dark">{employee?.personal?.passport?.number || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-calendar-x me-2" />
                                                 Passport Exp Date
                                             </span>
-                                            <p className="text-dark text-end">15 May 2029</p>
+                                            <p className="text-dark text-end">{employee?.personal?.passport?.expiryDate || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-gender-male me-2" />
                                                 Nationality
                                             </span>
-                                            <p className="text-dark text-end">Indian</p>
+                                            <p className="text-dark text-end">{employee?.personal?.passport?.country || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-bookmark-plus me-2" />
                                                 Religion
                                             </span>
-                                            <p className="text-dark text-end">Christianity</p>
+                                            <p className="text-dark text-end">{employee?.personal?.religion || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-hotel-service me-2" />
                                                 Marital status
                                             </span>
-                                            <p className="text-dark text-end">Yes</p>
+                                            <p className="text-dark text-end">{employee?.personal?.maritalStatus || '-'}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between mb-2">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-briefcase-2 me-2" />
                                                 Employment of spouse
                                             </span>
-                                            <p className="text-dark text-end">No</p>
+                                            <p className="text-dark text-end">{employee?.personal?.employmentOfSpouse || "-"}</p>
                                         </div>
                                         <div className="d-flex align-items-center justify-content-between">
                                             <span className="d-inline-flex align-items-center">
                                                 <i className="ti ti-baby-bottle me-2" />
                                                 No. of children
                                             </span>
-                                            <p className="text-dark text-end">2</p>
+                                            <p className="text-dark text-end">{employee?.personal?.noOfChildren || '-'}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -380,40 +588,26 @@ const EmployeeDetails = () => {
                             </div>
                             <div className="card">
                                 <div className="card-body p-0">
-                                    <div className="p-3 border-bottom">
-                                        <div className="d-flex align-items-center justify-content-between">
-                                            <div>
-                                                <span className="d-inline-flex align-items-center">
-                                                    Primary
-                                                </span>
-                                                <h6 className="d-flex align-items-center fw-medium mt-1">
-                                                    Adrian Peralt{" "}
-                                                    <span className="d-inline-flex mx-1">
-                                                        <i className="ti ti-point-filled text-danger" />
-                                                    </span>
-                                                    Father
-                                                </h6>
+                                    {employee?.emergencyContacts.map((contact, index) => {
+                                        const label = index === 0 ? "Primary" : "Secondary";
+                                        return (
+                                            <div key={index} className="p-3 border-bottom">
+                                                <div className="d-flex align-items-center justify-content-between">
+                                                    <div>
+                                                        <span className="d-inline-flex align-items-center">{label}</span>
+                                                        <h6 className="d-flex align-items-center fw-medium mt-1">
+                                                            {contact.name}{" "}
+                                                            <span className="d-inline-flex mx-1">
+                                                                <i className="ti ti-point-filled text-danger" />
+                                                            </span>
+                                                            {contact.relation}
+                                                        </h6>
+                                                    </div>
+                                                    <p className="text-dark">{contact.phone}</p>
+                                                </div>
                                             </div>
-                                            <p className="text-dark">+1 127 2685 598</p>
-                                        </div>
-                                    </div>
-                                    <div className="p-3 border-bottom">
-                                        <div className="d-flex align-items-center justify-content-between">
-                                            <div>
-                                                <span className="d-inline-flex align-items-center">
-                                                    Secondry
-                                                </span>
-                                                <h6 className="d-flex align-items-center fw-medium mt-1">
-                                                    Karen Wills{" "}
-                                                    <span className="d-inline-flex mx-1">
-                                                        <i className="ti ti-point-filled text-danger" />
-                                                    </span>
-                                                    Mother
-                                                </h6>
-                                            </div>
-                                            <p className="text-dark">+1 989 7774 787</p>
-                                        </div>
-                                    </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </div>
@@ -462,12 +656,7 @@ const EmployeeDetails = () => {
                                                     data-bs-parent="#accordionExample"
                                                 >
                                                     <div className="accordion-body mt-2">
-                                                        As an award winning designer, I deliver exceptional
-                                                        quality work and bring value to your brand! With 10
-                                                        years of experience and 350+ projects completed
-                                                        worldwide with satisfied customers, I developed the 360°
-                                                        brand approach, which helped me to create numerous
-                                                        brands that are relevant, meaningful and loved.
+                                                        {employee?.about || '-'}
                                                     </div>
                                                 </div>
                                             </div>
@@ -798,7 +987,8 @@ const EmployeeDetails = () => {
                                                             id="myTab"
                                                             role="tablist"
                                                         >
-                                                            <li className="nav-item" role="presentation">
+                                                             {/* Commented out Projects tab */}
+                                                            {/* <li className="nav-item" role="presentation">
                                                                 <button
                                                                     className="nav-link active"
                                                                     id="info-tab2"
@@ -810,7 +1000,7 @@ const EmployeeDetails = () => {
                                                                 >
                                                                     Projects
                                                                 </button>
-                                                            </li>
+                                                            </li> */}
                                                             <li className="nav-item" role="presentation">
                                                                 <button
                                                                     className="nav-link"
@@ -827,14 +1017,14 @@ const EmployeeDetails = () => {
                                                         </ul>
                                                     </div>
                                                     <div className="tab-content" id="myTabContent3">
-                                                        <div
+                                                        {/* <div
                                                             className="tab-pane fade show active"
                                                             id="basic-info2"
                                                             role="tabpanel"
                                                             aria-labelledby="info-tab2"
                                                             tabIndex={0}
-                                                        >
-                                                            <div className="row">
+                                                        > */}
+                                                            {/* <div className="row">
                                                                 <div className="col-md-6 d-flex">
                                                                     <div className="card flex-fill mb-4 mb-md-0">
                                                                         <div className="card-body">
@@ -962,195 +1152,110 @@ const EmployeeDetails = () => {
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                        </div>
+                                                        </div> */}
                                                         <div
-                                                            className="tab-pane fade"
+                                                            className="tab-pane fade show active"
                                                             id="address2"
                                                             role="tabpanel"
                                                             aria-labelledby="address-tab2"
                                                             tabIndex={0}
                                                         >
                                                             <div className="row">
-                                                                <div className="col-md-12 d-flex">
-                                                                    <div className="card flex-fill">
-                                                                        <div className="card-body">
-                                                                            <div className="row align-items-center">
-                                                                                <div className="col-md-8">
-                                                                                    <div className="d-flex align-items-center">
-                                                                                        <Link
-                                                                                            to={all_routes.projectdetails}
-                                                                                            className="flex-shrink-0 me-2"
-                                                                                        >
-                                                                                            <ImageWithBasePath
-                                                                                                src="assets/img/products/product-05.jpg"
-                                                                                                className="img-fluid rounded-circle"
-                                                                                                alt="img"
-                                                                                            />
-                                                                                        </Link>
-                                                                                        <div>
-                                                                                            <h6 className="mb-1">
-                                                                                                <Link to={all_routes.projectdetails}>
-                                                                                                    Dell Laptop - #343556656
-                                                                                                </Link>
-                                                                                            </h6>
-                                                                                            <div className="d-flex align-items-center">
-                                                                                                <p>
-                                                                                                    <span className="text-primary">
-                                                                                                        AST - 001
-                                                                                                        <i className="ti ti-point-filled text-primary mx-1" />
-                                                                                                    </span>
-                                                                                                    Assigned on 22 Nov, 2022 10:32AM{" "}
-                                                                                                </p>
+                                                                {employee?.assets.map((asset, idx) => (
+                                                                    <div key={idx} className="col-md-12 d-flex mb-3">
+                                                                        <div className="card flex-fill">
+                                                                            <div className="card-body">
+                                                                                <div className="row align-items-center">
+                                                                                    <div className="col-md-8">
+                                                                                        <div className="d-flex align-items-center">
+                                                                                            <Link
+                                                                                                to={all_routes.projectdetails}
+                                                                                                className="flex-shrink-0 me-2"
+                                                                                            >
+                                                                                                <img
+                                                                                                    src={asset.assetImageUrl || "assets/img/products/default.jpg"}
+                                                                                                    className="img-fluid rounded-circle"
+                                                                                                    alt={asset.assetName}
+                                                                                                    style={{ width: "48px", height: "48px" }}
+                                                                                                />
+                                                                                            </Link>
+                                                                                            <div>
+                                                                                                <h6 className="mb-1">
+                                                                                                    <Link to={all_routes.projectdetails}>
+                                                                                                        {asset.assetName} - #{asset.serialNumber}
+                                                                                                    </Link>
+                                                                                                </h6>
+                                                                                                <div className="d-flex align-items-center">
+                                                                                                    <p>
+                                                                                                        <span className="text-primary">
+                                                                                                            AST - 001{" "}
+                                                                                                            <i className="ti ti-point-filled text-primary mx-1" />
+                                                                                                        </span>
+                                                                                                        Assigned on {new Date(asset.issuedDate).toLocaleDateString()}{" "}
+                                                                                                        {new Date(asset.issuedDate).toLocaleTimeString()}
+                                                                                                    </p>
+                                                                                                </div>
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
-                                                                                </div>
-                                                                                <div className="col-md-3">
-                                                                                    <div>
-                                                                                        <span className="mb-1 d-block">
-                                                                                            Assigned by
-                                                                                        </span>
-                                                                                        <Link
-                                                                                            to="#"
-                                                                                            className="fw-normal d-flex align-items-center"
-                                                                                        >
-                                                                                            <ImageWithBasePath
-                                                                                                className="avatar avatar-sm rounded-circle me-2"
-                                                                                                src="assets/img/profiles/avatar-01.jpg"
-                                                                                                alt="Img"
-                                                                                            />
-                                                                                            Andrew Symon
-                                                                                        </Link>
+                                                                                    <div className="col-md-3">
+                                                                                        <div>
+                                                                                            <span className="mb-1 d-block">Assigned by</span>
+                                                                                            <Link
+                                                                                                to="#"
+                                                                                                className="fw-normal d-flex align-items-center"
+                                                                                            >
+                                                                                                <img
+                                                                                                    className="avatar avatar-sm rounded-circle me-2"
+                                                                                                    src={asset.assigneeAvatar || "assets/img/profiles/default.jpg"}
+                                                                                                    alt="Assignee"
+                                                                                                    style={{ width: "32px", height: "32px" }}
+                                                                                                />
+                                                                                                {asset.assignedBy || "Unknown"}
+                                                                                            </Link>
+                                                                                        </div>
                                                                                     </div>
-                                                                                </div>
-                                                                                <div className="col-md-1">
-                                                                                    <div className="dropdown ms-2">
-                                                                                        <Link
-                                                                                            to="#"
-                                                                                            className="d-inline-flex align-items-center"
-                                                                                            data-bs-toggle="dropdown"
-                                                                                            aria-expanded="false"
-                                                                                        >
-                                                                                            <i className="ti ti-dots-vertical" />
-                                                                                        </Link>
-                                                                                        <ul className="dropdown-menu dropdown-menu-end p-3">
-                                                                                            <li>
-                                                                                                <Link
-                                                                                                    to="#"
-                                                                                                    className="dropdown-item rounded-1"
-                                                                                                    data-bs-toggle="modal" data-inert={true}
-                                                                                                    data-bs-target="#asset_info"
-                                                                                                >
-                                                                                                    View Info
-                                                                                                </Link>
-                                                                                            </li>
-                                                                                            <li>
-                                                                                                <Link
-                                                                                                    to="#"
-                                                                                                    className="dropdown-item rounded-1"
-                                                                                                    data-bs-toggle="modal" data-inert={true}
-                                                                                                    data-bs-target="#refuse_msg"
-                                                                                                >
-                                                                                                    Raise Issue{" "}
-                                                                                                </Link>
-                                                                                            </li>
-                                                                                        </ul>
+                                                                                    <div className="col-md-1">
+                                                                                        <div className="dropdown ms-2">
+                                                                                            <Link
+                                                                                                to="#"
+                                                                                                className="d-inline-flex align-items-center"
+                                                                                                data-bs-toggle="dropdown"
+                                                                                                aria-expanded="false"
+                                                                                            >
+                                                                                                <i className="ti ti-dots-vertical" />
+                                                                                            </Link>
+                                                                                            {/* <ul className="dropdown-menu dropdown-menu-end p-3">
+                                                                                                <li>
+                                                                                                    <Link
+                                                                                                        to="#"
+                                                                                                        className="dropdown-item rounded-1"
+                                                                                                        data-bs-toggle="modal"
+                                                                                                        data-inert={true}
+                                                                                                        data-bs-target="#asset_info"
+                                                                                                    >
+                                                                                                        View Info
+                                                                                                    </Link>
+                                                                                                </li>
+                                                                                                <li>
+                                                                                                    <Link
+                                                                                                        to="#"
+                                                                                                        className="dropdown-item rounded-1"
+                                                                                                        data-bs-toggle="modal"
+                                                                                                        data-inert={true}
+                                                                                                        data-bs-target="#refuse_msg"
+                                                                                                    >
+                                                                                                        Raise Issue
+                                                                                                    </Link>
+                                                                                                </li>
+                                                                                            </ul> */}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
                                                                             </div>
                                                                         </div>
                                                                     </div>
-                                                                </div>
-                                                                <div className="col-md-12 d-flex">
-                                                                    <div className="card flex-fill mb-0">
-                                                                        <div className="card-body">
-                                                                            <div className="row align-items-center">
-                                                                                <div className="col-md-8">
-                                                                                    <div className="d-flex align-items-center">
-                                                                                        <Link
-                                                                                            to={all_routes.projectdetails}
-                                                                                            className="flex-shrink-0 me-2"
-                                                                                        >
-                                                                                            <ImageWithBasePath
-                                                                                                src="assets/img/products/product-06.jpg"
-                                                                                                className="img-fluid rounded-circle"
-                                                                                                alt="img"
-                                                                                            />
-                                                                                        </Link>
-                                                                                        <div>
-                                                                                            <h6 className="mb-1">
-                                                                                                <Link to={all_routes.projectdetails}>
-                                                                                                    Bluetooth Mouse - #478878
-                                                                                                </Link>
-                                                                                            </h6>
-                                                                                            <div className="d-flex align-items-center">
-                                                                                                <p>
-                                                                                                    <span className="text-primary">
-                                                                                                        AST - 001
-                                                                                                        <i className="ti ti-point-filled text-primary mx-1" />
-                                                                                                    </span>
-                                                                                                    Assigned on 22 Nov, 2022 10:32AM{" "}
-                                                                                                </p>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="col-md-3">
-                                                                                    <div>
-                                                                                        <span className="mb-1 d-block">
-                                                                                            Assigned by
-                                                                                        </span>
-                                                                                        <Link
-                                                                                            to="#"
-                                                                                            className="fw-normal d-flex align-items-center"
-                                                                                        >
-                                                                                            <ImageWithBasePath
-                                                                                                className="avatar avatar-sm rounded-circle me-2"
-                                                                                                src="assets/img/profiles/avatar-01.jpg"
-                                                                                                alt="Img"
-                                                                                            />
-                                                                                            Andrew Symon
-                                                                                        </Link>
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="col-md-1">
-                                                                                    <div className="dropdown ms-2">
-                                                                                        <Link
-                                                                                            to="#"
-                                                                                            className="d-inline-flex align-items-center"
-                                                                                            data-bs-toggle="dropdown"
-                                                                                            aria-expanded="false"
-                                                                                        >
-                                                                                            <i className="ti ti-dots-vertical" />
-                                                                                        </Link>
-                                                                                        <ul className="dropdown-menu dropdown-menu-end p-3">
-                                                                                            <li>
-                                                                                                <Link
-                                                                                                    to="#"
-                                                                                                    className="dropdown-item rounded-1"
-                                                                                                    data-bs-toggle="modal" data-inert={true}
-                                                                                                    data-bs-target="#asset_info"
-                                                                                                >
-                                                                                                    View Info
-                                                                                                </Link>
-                                                                                            </li>
-                                                                                            <li>
-                                                                                                <Link
-                                                                                                    to="#"
-                                                                                                    className="dropdown-item rounded-1"
-                                                                                                    data-bs-toggle="modal" data-inert={true}
-                                                                                                    data-bs-target="#refuse_msg"
-                                                                                                >
-                                                                                                    Raise Issue{" "}
-                                                                                                </Link>
-                                                                                            </li>
-                                                                                        </ul>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
+                                                                ))}
                                                             </div>
                                                         </div>
                                                     </div>

@@ -319,7 +319,7 @@ const hrDashboardController = (socket, io) => {
 
             socket.emit("hrm/employees/get-employee-grid-stats-response", result);
         } catch (error) {
-            console.log(error);            
+            console.log(error);
             socket.emit("hrm/employees/get-employee-frid-stats-response", {
                 done: false,
                 error: error.message || "Unexpected error fetching employee stats",
@@ -969,7 +969,7 @@ const hrDashboardController = (socket, io) => {
             socket.emit("hrm/employees/update-permissions-response", response);
         } catch (error) {
             console.log(error);
-            
+
             socket.emit("hrm/employees/update-permissions-response", {
                 done: false,
                 error: error.message || "Unexpected error updating permissions",
@@ -1000,6 +1000,43 @@ const hrDashboardController = (socket, io) => {
             });
         }
     }))
+
+    // cru ops on employee details
+
+    socket.on("hrm/employees/get-details", async (payload) => {
+        try {
+
+            const { companyId, hrId } = validateHrAccess(socket);
+            
+            const employeeId = typeof payload.employeeId === "string" ? payload.employeeId.trim() : "";
+            if (!employeeId) {
+                throw new Error("Employee ID is required for permissions update");
+            }
+
+            const employeeInfoResult = await hrmEmployee.getEmployeeDetails(companyId, hrId, employeeId);
+
+            if (!employeeInfoResult.done) {
+                socket.emit("hrm/employees/get-details-response", {
+                    done: false,
+                    message: employeeInfoResult.message || "Failed to fetch employee info",
+                });
+                return;
+            }
+
+            socket.emit("hrm/employees/get-details-response", {
+                done: true,
+                data: employeeInfoResult.data,
+            });
+
+        } catch (error) {
+            console.log(error);
+            
+            socket.emit("employee/get-full-info-response", {
+                done: false,
+                message: error.message || "Internal server error",
+            });
+        }
+    });
 
 }
 export default hrDashboardController;

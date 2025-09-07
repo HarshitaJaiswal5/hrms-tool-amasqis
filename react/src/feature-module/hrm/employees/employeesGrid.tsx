@@ -1179,7 +1179,7 @@ const EmployeesGrid = () => {
                                             </div>
                                             <div className="text-center mb-3">
                                                 <h6 className="mb-1">
-                                                    <Link to={`${all_routes.employeedetails}/${_id}`}>{fullName}</Link>
+                                                    <Link to={`/employees/${emp._id}`}>{fullName}</Link>
                                                 </h6>
                                                 <span className="badge bg-pink-transparent fs-10 fw-medium">
                                                     {role || "employee"}

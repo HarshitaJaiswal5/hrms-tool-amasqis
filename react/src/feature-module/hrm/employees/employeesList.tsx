@@ -8,14 +8,9 @@ import { employee_list_details } from '../../../core/data/json/employees_list_de
 import { DatePicker } from 'antd';
 import CommonSelect from '../../../core/common/commonSelect';
 import CollapseHeader from '../../../core/common/collapse-header/collapse-header';
-import Password from 'antd/es/input/Password';
 import { useSocket } from "../../../SocketContext";
 import { Socket } from "socket.io-client";
 import { toast, ToastContainer } from "react-toastify";
-import Designations from './designations';
-import { format } from 'date-fns';
-import moment, { Moment } from "moment";
-import { companyName } from '../../../core/common/selectoption/selectoption';
 import dayjs from "dayjs";
 
 

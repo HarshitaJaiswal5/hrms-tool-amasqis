@@ -1746,6 +1746,12 @@ export const publicRoutes = [
     roles: ["public"],
   },
   {
+    path: routes.employeeDetails,
+    element: <EmployeeDetails />,
+    route: Route,
+    roles: ["public"],
+  },
+  {
     path: routes.departments,
     element: <Department />,
     route: Route,

@@ -335,6 +335,7 @@ export const all_routes = {
   //HRM
   employeeList: "/employees",
   employeeGrid: "/employees-grid",
+  employeeDetails: "/employees/:employeeId",
   departments: "/departments",
   designations: "/designations",
   policy: "/policy",
