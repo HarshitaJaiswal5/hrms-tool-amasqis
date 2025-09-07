@@ -151,6 +151,229 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
   }
 };
 
+export const getEmployeeGridsStats = async (companyId, hrId, filters) => {
+  try {
+    const collections = getTenantCollections(companyId);
+
+    // Validate HR
+    const hrCount = await collections.hr.countDocuments({
+      _id: new ObjectId(hrId),
+    });
+    if (hrCount === 0) {
+      console.warn("HR not found in specified company");
+      return { done: false, error: "HR not found in the specified company" };
+    }
+
+    // Date filters
+    let start, end;
+    if (filters.startDate) {
+      start = new Date(filters.startDate);
+      start.setUTCHours(0, 0, 0, 0);
+    }
+    if (filters.endDate) {
+      end = new Date(filters.endDate);
+      end.setUTCHours(23, 59, 59, 999);
+    }
+
+    // Query match construction
+    const baseMatch = {};
+    if (filters.status && ["active", "inactive"].includes(filters.status)) {
+      baseMatch.status = filters.status;
+    }
+    if (filters.departmentId && typeof filters.departmentId === "string") {
+      baseMatch.departmentId = filters.departmentId;
+    }
+
+    // Faceted aggregation pipeline
+    const pipeline = [
+      {
+        $facet: {
+          employees: [
+            {
+              $addFields: {
+                dateOfJoining: { $toDate: "$dateOfJoining" }
+              }
+            },
+            {
+              $match: {
+                ...baseMatch,
+                ...(start || end
+                  ? {
+                    dateOfJoining: {
+                      ...(start ? { $gte: start } : {}),
+                      ...(end ? { $lte: end } : {})
+                    }
+                  }
+                  : {})
+              }
+            },
+            {
+              $lookup: {
+                from: "designations",
+                localField: "designation",
+                foreignField: "_id",
+                as: "designationInfo"
+              }
+            },
+            {
+              $lookup: {
+                from: "departments",
+                localField: "department",
+                foreignField: "_id",
+                as: "departmentInfo"
+              }
+            },
+            {
+              $addFields: {
+                designationName: { $arrayElemAt: ["$designationInfo.name", 0] },
+                departmentName: { $arrayElemAt: ["$departmentInfo.name", 0] },
+              }
+            },
+            {
+              $lookup: {
+                from: "permissions",
+                localField: "_id",
+                foreignField: "employeeId",
+                as: "permissionsInfo"
+              }
+            },
+            {
+              $lookup: {
+                from: "projects",
+                let: { employeeIdStr: { $toString: "$_id" } },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $in: [
+                          "$$employeeIdStr",
+                          { $ifNull: ["$empMembers", []] } 
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    $group: {
+                      _id: null,
+                      totalProjects: { $sum: 1 },
+                      completedProjects: {
+                        $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] }
+                      }
+                    }
+                  }
+                ],
+                as: "projectStats"
+              }
+            },
+            {
+              $addFields: {
+                totalProjects: { $ifNull: [{ $arrayElemAt: ["$projectStats.totalProjects", 0] }, 0] },
+                completedProjects: { $ifNull: [{ $arrayElemAt: ["$projectStats.completedProjects", 0] }, 0] },
+                productivity: {
+                  $cond: [
+                    { $eq: [{ $arrayElemAt: ["$projectStats.totalProjects", 0] }, 0] },
+                    0,
+                    {
+                      $multiply: [
+                        {
+                          $divide: [
+                            { $arrayElemAt: ["$projectStats.completedProjects", 0] },
+                            { $arrayElemAt: ["$projectStats.totalProjects", 0] }
+                          ]
+                        },
+                        100
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              $addFields: { employeeRecord: "$$ROOT" }
+            },
+            {
+              $project: {
+                employeeRecord: 1,
+                totalProjects: 1,
+                completedProjects: 1,
+                productivity: 1
+              }
+            }
+          ],
+          stats: [
+            {
+              $group: {
+                _id: null,
+                totalEmployees: { $sum: 1 },
+                activeCount: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", "Active"] }, 1, 0]
+                  }
+                },
+                inactiveCount: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", "Inactive"] }, 1, 0]
+                  }
+                },
+                newJoinersCount: {
+                  $sum: {
+                    $cond: [
+                      { $gte: ["$dateOfJoining", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)] },
+                      1,
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ];
+
+    // Aggregation execution
+    const result = await collections.employees.aggregate(pipeline).toArray();
+    const employeesRaw = result[0].employees;
+
+    // Flatten and format employee records
+    const employees = employeesRaw.map(emp => {
+      const { permissionsInfo, ...rest } = emp.employeeRecord;
+      const effectivePermissionsInfo = Array.isArray(emp.employeeRecord.permissionsInfo) && emp.employeeRecord.permissionsInfo.length === 1
+        ? emp.employeeRecord.permissionsInfo[0]
+        : emp.employeeRecord.permissionsInfo;
+
+      return {
+        ...rest,
+        enabledModules: effectivePermissionsInfo?.enabledModules || {},
+        permissions: effectivePermissionsInfo?.permissions || {},
+        totalProjects: emp.totalProjects,
+        completedProjects: emp.completedProjects,
+        productivity: emp.productivity,
+      };
+    });
+
+    // Extract global stats
+    const statsObj = (result[0].stats && result[0].stats[0])
+      ? result[0].stats[0]
+      : { totalEmployees: 0, activeCount: 0, inactiveCount: 0, newJoinersCount: 0 };
+
+    return {
+      done: true,
+      message: "Employee details updated successfully",
+      data: {
+        stats: statsObj,
+        employees,
+      }
+    };
+  } catch (error) {
+    console.error("Error in getEmployeeGridsStats:", error);
+    return {
+      done: false,
+      error: `Failed to get employee stats: ${error.message}`,
+    };
+  }
+};
+
 export const updateEmployeeDetails = async (companyId, hrId, payload) => {
   try {
     if (!companyId || !hrId) {
@@ -277,7 +500,6 @@ export const getPermissions = async (companyId, hrId, employeeId) => {
 
 export const updatePermissions = async (companyId, hrId, employeeId, payload) => {
   try {
-    console.log("***************Update employee called*********");
     if (!companyId || !hrId || !employeeId) {
       return { done: false, error: "Missing required parameters" };
     }

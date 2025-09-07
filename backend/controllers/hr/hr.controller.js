@@ -282,6 +282,51 @@ const hrDashboardController = (socket, io) => {
         }
     });
 
+    socket.on("hrm/employees/get-employee-grid-stats", async (payload) => {
+        try {
+            const { companyId, hrId } = validateHrAccess(socket);
+            const {
+                startDate: rawStartDate,
+                endDate: rawEndDate,
+                departmentId: rawDeparmentId,
+                status: rawStatus,
+            } = payload || {};
+
+            let startDate = null;
+            if (typeof rawStartDate === "string" && rawStartDate.trim() !== "") {
+                const sd = new Date(rawStartDate.trim());
+                startDate = isNaN(sd.getTime()) ? null : sd;
+            }
+
+            let endDate = null;
+            if (typeof rawEndDate === "string" && rawEndDate.trim() !== "") {
+                const ed = new Date(rawEndDate.trim());
+                endDate = isNaN(ed.getTime()) ? null : ed;
+            }
+
+            const allowedStatus = ["Active", "Inactive"];
+
+            const departmentId =
+                typeof rawDeparmentId === "string" ? rawDeparmentId.trim() : "";
+
+            const status =
+                typeof rawStatus === "string" && allowedStatus.includes(rawStatus.trim())
+                    ? rawStatus.trim()
+                    : null;
+
+            const sanitizedFilter = { startDate, endDate, departmentId, status };
+            const result = await hrServices.getEmployeeGridsStats(companyId, hrId, sanitizedFilter);
+
+            socket.emit("hrm/employees/get-employee-grid-stats-response", result);
+        } catch (error) {
+            console.log(error);            
+            socket.emit("hrm/employees/get-employee-frid-stats-response", {
+                done: false,
+                error: error.message || "Unexpected error fetching employee stats",
+            });
+        }
+    });
+
     // crud ops on policy
 
     socket.on("hr/policy/add", withRateLimit(async (payload) => {

@@ -14,8 +14,10 @@ import { Socket } from "socket.io-client";
 import { toast, ToastContainer } from "react-toastify";
 import Designations from './designations';
 import { format } from 'date-fns';
-import moment from 'moment';
+import moment, { Moment } from "moment";
 import { companyName } from '../../../core/common/selectoption/selectoption';
+import dayjs from "dayjs";
+
 
 interface Department {
   _id: string;
@@ -50,7 +52,7 @@ interface Employee {
   departmentId: string;
   designationId: string;
   status: 'Active' | 'Inactive';
-  dateOfJoining: string;
+  dateOfJoining: string | null;
   about: string;
   role: string;
   enabledModules: Record<PermissionModule, boolean>;
@@ -531,6 +533,7 @@ const EmployeeList = () => {
       setFormData(prev => ({ ...prev, [name]: value }));
     }
   };
+
   const onSelectStatus = (status: string) => {
     if (!status) return;
     setSelectedStatus(status);
@@ -992,7 +995,7 @@ const EmployeeList = () => {
         email: editingEmployee.contact.email,
         phone: editingEmployee.contact.phone,
       },
-      company: editingEmployee.companyName || editingEmployee.companyName,
+      companyName: editingEmployee.companyName || editingEmployee.companyName,
       departmentId: editingEmployee.departmentId,
       designationId: editingEmployee.designationId,
       dateOfJoining: editingEmployee.dateOfJoining,
@@ -1013,7 +1016,6 @@ const EmployeeList = () => {
   // 2. Update permissions
   const handlePermissionUpdateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("****he****");
 
     if (!editingEmployee) {
       console.log("****he**-**");
@@ -1025,8 +1027,6 @@ const EmployeeList = () => {
       permissions: permissions.permissions,
       enabledModules: permissions.enabledModules,
     };
-    console.log("****he****");
-
     console.log("edit perm payload", payload);
 
     if (socket) {
@@ -2062,10 +2062,13 @@ const EmployeeList = () => {
                               getPopupContainer={getModalContainer}
                               placeholder="DD-MM-YYYY"
                               name="dateOfJoining"
-                              value={editingEmployee && editingEmployee.dateOfJoining ? moment(editingEmployee.dateOfJoining) : null}
-                              onChange={date => {
+                              value={editingEmployee?.dateOfJoining ? dayjs(editingEmployee.dateOfJoining) : null}
+                              onChange={(date: dayjs.Dayjs | null) => {
                                 setEditingEmployee(prev =>
-                                  prev ? { ...prev, dateOfJoining: date ? date.toISOString() : "" } : prev
+                                  prev ? {
+                                    ...prev,
+                                    dateOfJoining: date ? date.toDate().toISOString() : ""
+                                  } : prev
                                 );
                               }}
                             />
@@ -2086,7 +2089,7 @@ const EmployeeList = () => {
                             value={editingEmployee?.account.userName}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
-                                prev ? { ...prev, userName: e.target.value } : prev)}
+                                prev ? { ...prev, account: { ...prev.account, userName: e.target.value } } : prev)}
                           />
                         </div>
                       </div>
@@ -2101,7 +2104,7 @@ const EmployeeList = () => {
                             value={editingEmployee?.contact.email}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
-                                prev ? { ...prev, email: e.target.value } : prev)}
+                                prev ? { ...prev, contact: { ...prev.contact, email: e.target.value } } : prev)}
                           />
                         </div>
                       </div>
@@ -2116,7 +2119,7 @@ const EmployeeList = () => {
                             value={editingEmployee?.contact.phone}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
-                                prev ? { ...prev, phone: e.target.value } : prev)}
+                                prev ? { ...prev, contact: { ...prev.contact, phone: e.target.value } } : prev)}
                           />
                         </div>
                       </div>
@@ -2131,7 +2134,7 @@ const EmployeeList = () => {
                             value={editingEmployee?.companyName}
                             onChange={(e) =>
                               setEditingEmployee(prev =>
-                                prev ? { ...prev, company: e.target.value } : prev)}
+                                prev ? { ...prev, companyName: e.target.value } : prev)}
                           />
                         </div>
                       </div>
