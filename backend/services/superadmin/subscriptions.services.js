@@ -102,9 +102,14 @@ export const fetchSubscriptions = async () => {
     // Fetch all companies with their package details
     const subscriptions = await companiesCollection.aggregate([
       {
+        $addFields: {
+          plan_id_obj: { $toObjectId: "$plan_id" }
+        }
+      },
+      {
         $lookup: {
           from: "packages",
-          localField: "plan_id",
+          localField: "plan_id_obj",
           foreignField: "_id",
           as: "packageDetails"
         }

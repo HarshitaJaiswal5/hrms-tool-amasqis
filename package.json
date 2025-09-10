@@ -1,6 +1,13 @@
 {
+  "name": "hrms",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:back\" \"npm run dev:front\"",
+    "dev:back": "cd backend && npm start",
+    "dev:front": "cd react && npm start"
+  },
   "devDependencies": {
-    "@types/chart.js": "^2.9.41"
+    "@types/chart.js": "^2.9.41",
+    "concurrently": "^8.2.2"
   },
   "dependencies": {
     "@clerk/clerk-sdk-node": "^5.1.6",

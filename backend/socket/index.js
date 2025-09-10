@@ -90,7 +90,7 @@ export const socketHandler = (httpServer) => {
   io.use(async (socket, next) => {
     console.log("Socket connection attempt...");
     const token = socket.handshake.auth.token;
-    console.log(token);
+    console.log("Token received:", token ? "Token present" : "No token");
     if (!token) {
       console.error("No token provided");
       return next(new Error("Authentication error: No token provided"));
@@ -106,7 +106,17 @@ export const socketHandler = (httpServer) => {
         console.log(`Token verified! User ID: ${verifiedToken.sub}`);
         socket.user = verifiedToken;
 
-        const user = await clerkClient.users.getUser(verifiedToken.sub);
+        let user;
+        try {
+          user = await clerkClient.users.getUser(verifiedToken.sub);
+        } catch (clerkError) {
+          console.error(`Failed to fetch user from Clerk:`, clerkError.message);
+          console.error(`Clerk error details:`, {
+            userId: verifiedToken.sub,
+            error: clerkError
+          });
+          return next(new Error("Authentication error: Failed to fetch user data"));
+        }
 
         // Store user metadata on socket for security checks
         socket.userMetadata = user.publicMetadata;
@@ -114,12 +124,19 @@ export const socketHandler = (httpServer) => {
         // Check if role exists, else assign default role based on metadata
         let role = user.publicMetadata?.role;
         let companyId = user.publicMetadata?.companyId || null;
+        
+        // TEMPORARY FIX: Auto-assign companyId for admin users in development
+        if (isDevelopment && role === "admin" && !companyId) {
+          companyId = "68443081dcdfe43152aebf80";
+          console.log(`🔧 Development fix: Auto-assigning companyId ${companyId} to admin user`);
+        }
 
         console.log(`User ${user.id} metadata:`, {
           role: role,
           companyId: companyId,
           hasVerification: !!user.publicMetadata?.isAdminVerified,
           environment: isDevelopment ? "development" : "production",
+          publicMetadata: user.publicMetadata
         });
 
         if (!role) {
@@ -127,6 +144,9 @@ export const socketHandler = (httpServer) => {
           // Only assign 'employee' role if they have a companyId and are verified
           if (companyId && user.publicMetadata?.isVerified) {
             role = "employee"; // Default to employee, not admin
+          } else if (isDevelopment && companyId) {
+            role = "admin"; // In development, allow admin role for testing
+            console.log(`[Development] Setting admin role for user ${user.id}`);
           } else {
             role = "public"; // Public users have no company access
           }
@@ -138,7 +158,7 @@ export const socketHandler = (httpServer) => {
 
           // Update metadata with the assigned role
           await clerkClient.users.updateUserMetadata(user.id, {
-            publicMetadata: { ...user.publicMetadata, role },
+            publicMetadata: { ...user.publicMetadata, role, companyId },
           });
         } else {
           console.log(`User ${user.id} has existing role: ${role}`);
@@ -174,11 +194,16 @@ export const socketHandler = (httpServer) => {
           }
         }
 
+        // Store user ID for easy access & Mark socket as authenticated
+        socket.userId = verifiedToken.sub;
         socket.role = role;
         socket.companyId = companyId;
+        socket.authenticated = true;
+
+        console.log(`Socket authentication complete for user: ${verifiedToken.sub}, role: ${role}, company: ${companyId}`);
 
         // SECURITY: Add rate limiting function to socket
-        socket.checkRateLimit = () => checkRateLimit(socket.user.sub);
+        socket.checkRateLimit = () => checkRateLimit(socket.userId);
 
         console.log(`Company ID: ${companyId || "None"}`);
 
@@ -191,6 +216,8 @@ export const socketHandler = (httpServer) => {
           case "admin":
             if (companyId) {
               socket.join(`admin_room_${companyId}`);
+              socket.join(`company_${companyId}`);
+              socket.join(`user_${user.id}`);
               console.log(`User joined admin_room_${companyId}`);
             } else {
               console.warn(`Admin user ${user.id} has no companyId`);
@@ -200,12 +227,16 @@ export const socketHandler = (httpServer) => {
           case "hr":
             if (companyId) {
               socket.join(`hr_room_${companyId}`);
+              socket.join(`company_${companyId}`);
+              socket.join(`user_${user.id}`);
               console.log(`User joined hr_room_${companyId}`);
             }
             break;
           case "employee":
             if (companyId) {
               socket.join(`employee_room_${companyId}`);
+              socket.join(`company_${companyId}`);
+              socket.join(`user_${user.id}`);
               console.log(`User joined employee_room_${companyId}`);
             }
             break;
@@ -227,9 +258,10 @@ export const socketHandler = (httpServer) => {
 
   io.on("connection", (socket) => {
     console.log(
-      `Client connected: ${socket.id}, Role: ${socket.role}, Company: ${socket.companyId || "None"
-      }`
+      `Client connected: ${socket.id}, Role: ${socket.role}, Company: ${socket.companyId || "None"}, UserId: ${socket.userId || "None"}`
     );
+    console.log(`Socket user metadata:`, socket.userMetadata);
+    console.log(`Socket user object:`, socket.user);
     const role = socket.role || "guest";
   router(socket, io, role);
 

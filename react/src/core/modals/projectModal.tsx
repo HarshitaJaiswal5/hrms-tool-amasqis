@@ -4,6 +4,7 @@ import CommonSelect from "../common/commonSelect";
 import Select from "react-select";
 import { DatePicker, TimePicker } from "antd";
 import CommonTextEditor from "../common/textEditor";
+import dayjs from "dayjs";
 import CommonTagsInput from "../common/Taginput";
 import { useSocket } from "../../SocketContext";
 import { Socket } from "socket.io-client";
@@ -312,6 +313,14 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
         setError("End date is required");
         return;
       }
+
+      const startDate = new Date(formData.startDate);
+      const endDate = new Date(formData.endDate);
+      if (endDate <= startDate) {
+        setError("End date must be after the start date");
+        return;
+      }
+
       setError(null);
       setCurrentStep(2);
     }
@@ -421,10 +430,7 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
         <div className="modal-dialog modal-dialog-centered">
           <div className="modal-content">
             <div className="modal-header header-border align-items-center justify-content-between">
-              <div className="d-flex align-items-center">
-                <h5 className="modal-title me-2">Add Project</h5>
-                <p className="text-dark">Project ID: {modalData.projectId}</p>
-              </div>
+              <h5 className="modal-title">Add Project</h5>
               <button
                 type="button"
                 className="btn-close custom-btn-close"
@@ -444,15 +450,7 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
               </div>
             )}
 
-            {error && (
-              <div className="modal-body">
-                <div className="alert alert-danger" role="alert">
-                  {error}
-                </div>
-              </div>
-            )}
-
-            {!loading && !error && (
+            {!loading && (
               <div className="add-info-fieldset">
                 <div className="add-details-wizard p-3 pb-0">
                   <ul className="progress-bar-wizard d-flex align-items-center border-bottom">
@@ -476,6 +474,11 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
                 {currentStep === 1 && (
                   <fieldset id="first-field-file">
                     <div className="modal-body">
+                      {error && (
+                        <div className="alert alert-danger mb-3" role="alert">
+                          {error}
+                        </div>
+                      )}
                       <div className="row">
                         <div className="col-md-12">
                           <div className="d-flex align-items-center flex-wrap row-gap-3 bg-light w-100 rounded p-3 mb-4">
@@ -613,7 +616,12 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
                                     onChange={(date, dateString) =>
                                       handleInputChange("endDate", dateString)
                                     }
-                                  />
+                                    disabledDate={(current) => {
+                                      if (!formData.startDate) return false;
+                                      const startDate = dayjs(formData.startDate, 'DD-MM-YYYY');
+                                      return current && (current.isSame(startDate, 'day') || current.isBefore(startDate, 'day'));
+                                    }}
+                                    />
                                   <span className="input-icon-addon">
                                     <i className="ti ti-calendar text-gray-7" />
                                   </span>
@@ -645,18 +653,23 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
                                 <label className="form-label">
                                   Project Value
                                 </label>
-                                <input
-                                  type="text"
-                                  className="form-control"
-                                  value={formData.projectValue}
-                                  onChange={(e) =>
-                                    handleInputChange(
-                                      "projectValue",
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder="$0"
-                                />
+                                <div className="input-group">
+                                  <span className="input-group-text">$</span>
+                                  <input
+                                    type="number"
+                                    className="form-control"
+                                    value={formData.projectValue}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                                        handleInputChange("projectValue", value);
+                                      }
+                                    }}
+                                    placeholder="0"
+                                    min="0"
+                                    step="0.01"
+                                  />
+                                </div>
                               </div>
                             </div>
                             <div className="col-md-6">
@@ -686,19 +699,24 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
                             </div>
                             <div className="col-md-6">
                               <div className="mb-3">
-                                <label className="form-label">Extra Time</label>
-                                <input
-                                  type="text"
-                                  className="form-control"
-                                  value={formData.extraTime}
-                                  onChange={(e) =>
-                                    handleInputChange(
-                                      "extraTime",
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder="Enter extra time"
-                                />
+                                <label className="form-label">Extra Time (Hours)</label>
+                                <div className="input-group">
+                                  <input
+                                    type="number"
+                                    className="form-control"
+                                    value={formData.extraTime}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      if (value === '' || /^\d+$/.test(value)) {
+                                        handleInputChange("extraTime", value);
+                                      }
+                                    }}
+                                    placeholder="0"
+                                    min="0"
+                                    step="1"
+                                  />
+                                  <span className="input-group-text">hours</span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -740,6 +758,11 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
                 {currentStep === 2 && (
                   <fieldset className="d-block">
                     <div className="modal-body">
+                      {error && (
+                        <div className="alert alert-danger mb-3" role="alert">
+                          {error}
+                        </div>
+                      )}
                       <div className="row">
                         <div className="col-md-12">
                           <div className="mb-3">
@@ -873,7 +896,6 @@ const ProjectModals: React.FC<ProjectModalsProps> = ({ onProjectCreated }) => {
           </div>
         </div>
       </div>
-      {/* /Add Project */}
       <ToastContainer />
     </>
   );

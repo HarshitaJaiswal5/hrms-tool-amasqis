@@ -1,26 +1,31 @@
 import React from "react";
 import { TagsInput } from "react-tag-input-component";
+import "./Taginput.css";
 
 interface CommonTagsInputProps {
     value: string[];
     onChange: (value: string[]) => void;
-    placeholder?: string; // Optional placeholder for the input
-    className?: string;   // Optional custom class for styling
+    placeholder?: string;
+    className?: string;
 }
 
 const CommonTagsInput: React.FC<CommonTagsInputProps> = ({
     value,
     onChange,
-    placeholder = "Add a tag", // Default placeholder
-    className = "input-tags form-control", // Default class
+    placeholder = "Add a tag",
 }) => {
     return (
-        <TagsInput
-            value={value}
-            onChange={onChange}
-            placeHolder={placeholder}
-            
-        />
+        <div className="custom-tags-container">
+            <TagsInput
+                value={value}
+                onChange={onChange}
+                placeHolder={placeholder}
+                classNames={{
+                    input: 'custom-tag-input',
+                    tag: 'custom-tag-chip'
+                }}
+            />
+        </div>
     );
 };
 

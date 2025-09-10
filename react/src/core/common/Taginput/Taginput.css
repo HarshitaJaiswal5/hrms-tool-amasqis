@@ -1,0 +1,113 @@
+.custom-tags-container {
+    position: relative;
+}
+
+.custom-tag-input {
+    border: none !important;
+    outline: none !important;
+    background: transparent !important;
+    padding: 8px 0 !important;
+    font-size: 14px !important;
+    min-height: 40px !important;
+    width: 100% !important;
+}
+
+.custom-tag-input:focus {
+    box-shadow: none !important;
+}
+
+.custom-tag-chip {
+    background: #f8f9fa !important;
+    border: 1px solid #e9ecef !important;
+    border-radius: 16px !important;
+    color: #495057 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 4px 12px !important;
+    margin: 2px 4px 2px 0 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    position: relative !important;
+    animation: tagFadeIn 0.3s ease-out !important;
+}
+
+.custom-tag-chip:hover {
+    background: #e9ecef !important;
+    border-color: #dee2e6 !important;
+    transform: translateY(-1px) !important;
+}
+
+.custom-tag-chip .rti--tag__content {
+    margin-right: 8px !important;
+}
+
+.custom-tag-chip .rti--tag__icon {
+    background: none !important;
+    border: none !important;
+    color: #6c757d !important;
+    cursor: pointer !important;
+    font-size: 16px !important;
+    line-height: 1 !important;
+    padding: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    margin-left: 4px !important;
+    transition: color 0.2s ease !important;
+}
+
+.custom-tag-chip .rti--tag__icon:hover {
+    color: #dc3545 !important;
+}
+
+.custom-tag-chip .rti--tag__icon::before {
+    content: '×' !important;
+    font-size: 18px !important;
+    font-weight: bold !important;
+}
+
+.custom-tags-container .rti--container {
+    border: 1px solid #ced4da !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    min-height: 48px !important;
+    background: #fff !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+}
+
+.custom-tags-container .rti--container:focus-within {
+    border-color: #007bff !important;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25) !important;
+}
+
+.custom-tags-container .rti--container .rti--input {
+    flex: 1 !important;
+    min-width: 120px !important;
+}
+
+@keyframes tagFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@media (max-width: 768px) {
+    .custom-tag-chip {
+        padding: 3px 10px !important;
+        font-size: 12px !important;
+        margin: 2px 2px 2px 0 !important;
+    }
+
+    .custom-tags-container .rti--container {
+        padding: 6px 8px !important;
+        min-height: 44px !important;
+    }
+}

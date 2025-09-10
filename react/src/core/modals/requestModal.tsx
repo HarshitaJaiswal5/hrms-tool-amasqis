@@ -45,6 +45,7 @@ const RequestModals: React.FC<RequestModalsProps> = ({ onLeaveRequestCreated }) 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadingBalance, setLoadingBalance] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -131,11 +132,10 @@ const RequestModals: React.FC<RequestModalsProps> = ({ onLeaveRequestCreated }) 
         if (onLeaveRequestCreated) {
           onLeaveRequestCreated();
         }
-        // Show success message
-        alert("Leave request created successfully!");
+        setError(null);
       } else {
         console.error("Error creating leave request:", response.error);
-        alert("Error creating leave request: " + response.error);
+        setError("Error creating leave request: " + response.error);
       }
     };
 
@@ -200,16 +200,17 @@ const RequestModals: React.FC<RequestModalsProps> = ({ onLeaveRequestCreated }) 
     e.preventDefault();
 
     if (!socket) {
-      alert("No connection available. Please refresh the page.");
+      setError("No connection available. Please refresh the page.");
       return;
     }
 
     if (!formData.employeeId || !formData.leaveType || !formData.fromDate || !formData.toDate || !formData.reason) {
-      alert("Please fill in all required fields");
+      setError("Please fill in all required fields");
       return;
     }
 
     setSubmitting(true);
+    setError(null);
 
     const requestData = {
       ...formData,
@@ -232,6 +233,7 @@ const RequestModals: React.FC<RequestModalsProps> = ({ onLeaveRequestCreated }) 
     setSelectedLeaveType(null);
     setLeaveBalance(null);
     setCalculatedDays(0);
+    setError(null);
   };
 
   const loadModalData = () => {
@@ -295,7 +297,13 @@ const RequestModals: React.FC<RequestModalsProps> = ({ onLeaveRequestCreated }) 
                     </div>
                   </div>
                 ) : (
-                  <div className="row">
+                  <>
+                    {error && (
+                      <div className="alert alert-danger" role="alert">
+                        {error}
+                      </div>
+                    )}
+                    <div className="row">
                     <div className="col-md-12">
                       <div className="mb-3">
                         <label className="form-label">Employee Name <span className="text-danger">*</span></label>
@@ -465,7 +473,8 @@ const RequestModals: React.FC<RequestModalsProps> = ({ onLeaveRequestCreated }) 
                         />
                       </div>
                     </div>
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
               <div className="modal-footer">

@@ -207,6 +207,14 @@ const AdminDashboard = () => {
     return user.imageUrl || "assets/img/profiles/avatar-31.jpg";
   };
 
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    const target = e.target as HTMLImageElement;
+    if (target.src.includes('assets/img/profiles/avatar-31.jpg')) {
+      return;
+    }
+    target.src = "assets/img/profiles/avatar-31.jpg";
+  };
+
   const filterTodosByCurrentFilter = useCallback((todos: any[]) => {
     if (!todos || todos.length === 0) return todos;
     if (todoFilter === 'all') return todos;
@@ -1287,10 +1295,7 @@ const AdminDashboard = () => {
                       src={getUserImage()}
                       alt="Profile"
                       className="rounded-circle"
-                      onError={(e) => {
-                        // Fallback to default image if user image fails to load
-                        (e.target as HTMLImageElement).src = "assets/img/profiles/avatar-31.jpg";
-                      }}
+                      onError={handleImageError}
                     />
                   ) : (
                     <ImageWithBasePath

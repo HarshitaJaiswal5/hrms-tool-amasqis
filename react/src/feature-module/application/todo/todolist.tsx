@@ -1,23 +1,481 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import TodoModal from "../../../core/modals/todoModal";
 import ImageWithBasePath from "../../../core/common/imageWithBasePath";
 import { all_routes } from "../../router/all_routes";
-import PredefinedDateRanges from "../../../core/common/datePicker";
 import { DatePicker } from "antd";
+import dayjs from "dayjs";
 import CollapseHeader from "../../../core/common/collapse-header/collapse-header";
+import { useSocket } from "../../../SocketContext";
+import { Socket } from "socket.io-client";
+
+const { RangePicker } = DatePicker;
+
+interface Todo {
+  _id: string;
+  title: string;
+  description?: string;
+  priority: string;
+  tag?: string;
+  dueDate?: string;
+  completed: boolean;
+  createdAt: string;
+  updatedAt: string;
+  userId: string;
+  assignedTo?: string;
+}
 
 
 
 const TodoList = () => {
+  const socket = useSocket() as Socket | null;
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [selectedTag, setSelectedTag] = useState("all");
+  const [selectedAssignee, setSelectedAssignee] = useState("all");
+  const [selectedStatus, setSelectedStatus] = useState("all");
+  const [sortBy, setSortBy] = useState("last7days");
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [availableAssignees, setAvailableAssignees] = useState<string[]>([]);
+  const [dateRangeFilter, setDateRangeFilter] = useState("all");
+  const [dueDateFilter, setDueDateFilter] = useState<string | null>(null);
+  const [customDateRange, setCustomDateRange] = useState<{start: string, end: string} | null>(null);
+  const [showCustomRange, setShowCustomRange] = useState(false);
+  const [selectedTodoToDelete, setSelectedTodoToDelete] = useState<string | null>(null);
+  const [selectedTodoToEdit, setSelectedTodoToEdit] = useState<Todo | null>(null);
+  const [selectedTodoToView, setSelectedTodoToView] = useState<Todo | null>(null);
 
-  const [isTodo, setIsTodo] = useState([false, false, false]);
-  const toggleTodo = (index: number) => {
-    setIsTodo((prevIsTodo) => {
-      const newIsTodo = [...prevIsTodo];
-      newIsTodo[index] = !newIsTodo[index];
-      return newIsTodo;
+  const toggleTodo = async (todoId: string, currentCompleted: boolean) => {
+    if (!socket) {
+      console.error('Socket not available');
+      return;
+    }
+
+    try {
+      const updateData = {
+        id: todoId,
+        completed: !currentCompleted
+      };
+
+      console.log('Updating todo completion status:', updateData);
+
+      const handleResponse = (response: any) => {
+        console.log('Update todo response received:', response);
+        if (response.done) {
+          console.log('Todo completion status updated successfully');
+          // The todos will be updated via the broadcast from the backend
+        } else {
+          console.error('Failed to update todo:', response.error);
+          // Revert the change in UI if update failed
+          setTodos(prevTodos => 
+            prevTodos.map(todo => 
+              todo._id === todoId 
+                ? { ...todo, completed: currentCompleted } // Revert to original state
+                : todo
+            )
+          );
+        }
+        // Remove the specific listener after handling the response
+        if (socket) {
+          socket.off("admin/dashboard/update-todo-response", handleResponse);
+        }
+      };
+
+      // Optimistically update the UI
+      setTodos(prevTodos => 
+        prevTodos.map(todo => 
+          todo._id === todoId 
+            ? { ...todo, completed: !currentCompleted }
+            : todo
+        )
+      );
+
+      if (socket) {
+        socket.on("admin/dashboard/update-todo-response", handleResponse);
+        socket.emit("admin/dashboard/update-todo", updateData);
+      }
+
+      // Add timeout to prevent infinite loading
+      setTimeout(() => {
+        console.error("Update todo request timed out");
+        if (socket) {
+          socket.off("admin/dashboard/update-todo-response", handleResponse);
+        }
+        // Revert the change if timeout
+        setTodos(prevTodos => 
+          prevTodos.map(todo => 
+            todo._id === todoId 
+              ? { ...todo, completed: currentCompleted }
+              : todo
+          )
+        );
+      }, 10000); // 10 second timeout
+
+    } catch (error) {
+      console.error('Error updating todo completion status:', error);
+      // Revert the change in UI if error occurred
+      setTodos(prevTodos => 
+        prevTodos.map(todo => 
+          todo._id === todoId 
+            ? { ...todo, completed: currentCompleted }
+            : todo
+        )
+      );
+    }
+  };
+
+  // Handle tag filter change
+  const handleTagChange = (tag: string) => {
+    setSelectedTag(tag);
+  };
+
+  // Handle assignee filter change
+  const handleAssigneeChange = (assignee: string) => {
+    setSelectedAssignee(assignee);
+  };
+
+  // Handle status filter change
+  const handleStatusChange = (status: string) => {
+    setSelectedStatus(status);
+  };
+
+  // Handle sort change
+  const handleSortChange = (sort: string) => {
+    setSortBy(sort);
+  };
+
+  // Handle date range filter change
+  const handleDateRangeChange = (range: string) => {
+    setDateRangeFilter(range);
+  };
+
+  // Handle due date filter change
+  const handleDueDateChange = (date: string | null) => {
+    setDueDateFilter(date);
+  };
+
+  // Handle custom date range change
+  const handleCustomDateRangeChange = (dates: any) => {
+    if (dates && dates.length === 2) {
+      const startDate = dates[0].format('YYYY-MM-DD');
+      const endDate = dates[1].format('YYYY-MM-DD');
+      console.log("Custom range changed:", { startDate, endDate });
+      setCustomDateRange({ start: startDate, end: endDate });
+      setDateRangeFilter("custom");
+      setShowCustomRange(false); // Close the picker after selection
+    } else {
+      setCustomDateRange(null);
+      setDateRangeFilter("all");
+    }
+  };
+
+  // Handle custom range click
+  const handleCustomRangeClick = () => {
+    setShowCustomRange(!showCustomRange);
+  };
+
+  // Handle new todo creation
+  const handleNewTodo = () => {
+    // This function can be called when a new todo is successfully created
+    // to refresh the todo list
+    if (socket) {
+      (socket as any).emit("admin/dashboard/get-todos", { filter: activeFilter });
+    }
+  };
+
+  // Handle todo deletion
+  const handleDeleteTodo = (todoId: string) => {
+    if (socket && todoId) {
+      console.log("Deleting todo:", todoId);
+      (socket as any).emit("admin/dashboard/delete-todo", todoId);
+      setSelectedTodoToDelete(null); // Reset the selected todo
+    } else {
+      console.error("Cannot delete todo - socket or todoId missing");
+    }
+  };
+
+  // Handle delete button click
+  const handleDeleteClick = (todoId: string) => {
+    console.log("Delete button clicked for todo:", todoId);
+    const confirmed = window.confirm("Are you sure you want to delete this todo? This action cannot be undone.");
+    if (confirmed) {
+      handleDeleteTodo(todoId);
+    }
+  };
+
+  // Handle edit button click
+  const handleEditClick = (todo: Todo) => {
+    setSelectedTodoToEdit(todo);
+    console.log('Edit todo clicked:', todo);
+  };
+
+  // Handle view button click
+  const handleViewClick = (todo: Todo) => {
+    setSelectedTodoToView(todo);
+    console.log('View todo clicked:', todo);
+  };
+
+  // Handle todo refresh
+  const handleTodoRefresh = () => {
+    if (socket) {
+      socket.emit("admin/dashboard/get-todos", { filter: activeFilter });
+    }
+  };
+
+  // Helper function to get date range based on filter
+  const getDateRange = (range: string) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    switch (range) {
+      case "today":
+        return {
+          start: today,
+          end: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        };
+      case "yesterday":
+        const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+        return {
+          start: yesterday,
+          end: today
+        };
+      case "last7days":
+        return {
+          start: new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000),
+          end: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        };
+      case "last30days":
+        // Last 30 days from today (rolling 30 days)
+        return {
+          start: new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000),
+          end: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        };
+      case "thismonth":
+        // Current calendar month (1st to last day of current month)
+        return {
+          start: new Date(now.getFullYear(), now.getMonth(), 1),
+          end: new Date(now.getFullYear(), now.getMonth() + 1, 1)
+        };
+      case "lastmonth":
+        // Previous calendar month
+        return {
+          start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+          end: new Date(now.getFullYear(), now.getMonth(), 1)
+        };
+      case "thisyear":
+        // Current year
+        return {
+          start: new Date(now.getFullYear(), 0, 1),
+          end: new Date(now.getFullYear() + 1, 0, 1)
+        };
+      case "custom":
+        // Custom date range
+        if (customDateRange && customDateRange.start && customDateRange.end) {
+          const startDate = new Date(customDateRange.start);
+          const endDate = new Date(customDateRange.end);
+          // Add 1 day to end date to include the full end day
+          endDate.setDate(endDate.getDate() + 1);
+          console.log("Custom range applied:", { start: startDate, end: endDate });
+          return {
+            start: startDate,
+            end: endDate
+          };
+        }
+        return null;
+      default:
+        return null; // All time
+    }
+  };
+
+  // Get filtered and sorted todos
+  const getFilteredTodos = () => {
+    let filteredTodos = todos.filter(todo => {
+      const tagMatch = selectedTag === "all" || todo.tag?.toLowerCase() === selectedTag.toLowerCase();
+      const assigneeMatch = selectedAssignee === "all" || (todo.assignedTo || todo.userId) === selectedAssignee;
+      
+      let statusMatch = true;
+      if (selectedStatus !== "all") {
+        switch (selectedStatus.toLowerCase()) {
+          case "completed":
+            statusMatch = todo.completed === true;
+            break;
+          case "pending":
+            statusMatch = todo.completed === false;
+            break;
+          case "inprogress":
+            // For now, treat as pending since we don't have inprogress status in data
+            statusMatch = todo.completed === false;
+            break;
+          case "onhold":
+            // For now, treat as pending since we don't have onhold status in data
+            statusMatch = todo.completed === false;
+            break;
+        }
+      }
+
+      // Date range filter (based on createdAt)
+      let dateRangeMatch = true;
+      if (dateRangeFilter !== "all") {
+        const dateRange = getDateRange(dateRangeFilter);
+        if (dateRange) {
+          const todoCreatedDate = new Date(todo.createdAt);
+          dateRangeMatch = todoCreatedDate >= dateRange.start && todoCreatedDate < dateRange.end;
+          if (dateRangeFilter === "custom") {
+            console.log("Custom filter check:", {
+              todoCreatedDate,
+              dateRange,
+              dateRangeMatch,
+              todoTitle: todo.title
+            });
+          }
+        }
+      }
+
+      // Due date filter (based on dueDate)
+      let dueDateMatch = true;
+      if (dueDateFilter) {
+        if (todo.dueDate) {
+          const todoDueDate = new Date(todo.dueDate);
+          const filterDate = new Date(dueDateFilter);
+          dueDateMatch = todoDueDate.toDateString() === filterDate.toDateString();
+        } else {
+          dueDateMatch = false; // If filtering by due date but todo has no due date
+        }
+      }
+      
+      return tagMatch && assigneeMatch && statusMatch && dateRangeMatch && dueDateMatch;
     });
+
+    // Sort todos based on sortBy
+    filteredTodos.sort((a, b) => {
+      switch (sortBy) {
+        case "last7days":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "last1month":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "last1year":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default:
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+
+    return filteredTodos;
+  };
+
+  // Fetch todos
+  useEffect(() => {
+    if (socket) {
+      (socket as any).emit("admin/dashboard/get-todos", { filter: activeFilter });
+      (socket as any).on("admin/dashboard/get-todos-response", (response: any) => {
+        if (response.done) {
+          const todosData = response.data || [];
+          setTodos(todosData);
+          
+          // Extract unique tags
+          const tags = Array.from(new Set(todosData.map((todo: Todo) => todo.tag).filter(Boolean))) as string[];
+          setAvailableTags(tags);
+          
+          // Extract unique assignees (using userId for now, can be enhanced with actual user names)
+          const assignees = Array.from(new Set(todosData.map((todo: Todo) => todo.assignedTo || todo.userId).filter(Boolean))) as string[];
+          setAvailableAssignees(assignees);
+        }
+        setLoading(false);
+      });
+
+      // Listen for todo creation success
+      (socket as any).on("admin/dashboard/add-todo-response", (response: any) => {
+        if (response.done) {
+          // Refresh the todo list after successful creation
+          (socket as any).emit("admin/dashboard/get-todos", { filter: activeFilter });
+        }
+      });
+
+      // Listen for todo update success
+      (socket as any).on("admin/dashboard/update-todo-response", (response: any) => {
+        if (response.done) {
+          // Refresh the todo list after successful update
+          (socket as any).emit("admin/dashboard/get-todos", { filter: activeFilter });
+        }
+      });
+
+      // Listen for todo deletion success
+      (socket as any).on("admin/dashboard/delete-todo-response", (response: any) => {
+        if (response.done) {
+          console.log("Todo deleted successfully");
+          // Refresh the todo list after successful deletion
+          (socket as any).emit("admin/dashboard/get-todos", { filter: activeFilter });
+        } else {
+          console.error("Delete failed:", response.error);
+        }
+      });
+
+      return () => {
+        (socket as any).off("admin/dashboard/get-todos-response");
+        (socket as any).off("admin/dashboard/add-todo-response");
+        (socket as any).off("admin/dashboard/update-todo-response");
+        (socket as any).off("admin/dashboard/delete-todo-response");
+      };
+    }
+  }, [socket, activeFilter]);
+
+  // Format date
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  };
+
+  // Get priority color
+  const getPriorityColor = (priority: string) => {
+    switch (priority?.toLowerCase()) {
+      case 'high': return 'text-purple';
+      case 'medium': return 'text-warning';
+      case 'low': return 'text-success';
+      default: return 'text-secondary';
+    }
+  };
+
+  // Get status badge class
+  const getStatusBadgeClass = (completed: boolean) => {
+    return completed 
+      ? "badge badge-soft-success d-inline-flex align-items-center"
+      : "badge badge-soft-secondary d-inline-flex align-items-center";
+  };
+
+  // Get tag badge class
+  const getTagBadgeClass = (tag: string) => {
+    const tagColors: { [key: string]: string } = {
+      'projects': 'badge-success',
+      'internal': 'badge-danger',
+      'reminder': 'badge-secondary',
+      'research': 'bg-pink',
+      'meetings': 'badge-purple',
+      'social': 'badge-info',
+      'bugs': 'badge-danger',
+      'animation': 'badge-warning',
+      'security': 'badge-danger',
+      'reports': 'badge-info'
+    };
+    return tagColors[tag?.toLowerCase()] || 'badge-secondary';
+  };
+
+  // Get progress percentage (mock calculation)
+  const getProgressPercentage = (todo: Todo) => {
+    return todo.completed ? 100 : Math.floor(Math.random() * 90) + 10;
+  };
+
+  // Get progress bar color
+  const getProgressBarColor = (percentage: number) => {
+    if (percentage >= 100) return 'bg-success';
+    if (percentage >= 70) return 'bg-purple';
+    if (percentage >= 40) return 'bg-warning';
+    return 'bg-danger';
   };
 
   const options = [
@@ -66,8 +524,9 @@ const TodoList = () => {
                   <Link
                     to="#"
                     className="btn btn-primary d-flex align-items-center"
-                    data-bs-toggle="modal" data-inert={true}
+                    data-bs-toggle="modal"
                     data-bs-target="#add_todo"
+                    title="Create a new todo task"
                   >
                     <i className="ti ti-circle-plus me-2" />
                     Create New
@@ -82,29 +541,223 @@ const TodoList = () => {
               <div className="card-header d-flex align-items-center justify-content-between flex-wrap row-gap-3">
                 <h5 className="d-flex align-items-center">
                   Todo Lists{" "}
-                  <span className="badge bg-soft-pink ms-2">200 Employees</span>
+                  <span className="badge bg-soft-pink ms-2">{getFilteredTodos().length} Todos</span>
                 </h5>
                 <div className="d-flex align-items-center flex-wrap row-gap-3">
-                  <div className="me-3">
-                    <div className="input-icon-end position-relative">
-                      <PredefinedDateRanges />
-                      <span className="input-icon-addon">
-                        <i className="ti ti-chevron-down" />
-                      </span>
-                    </div>
-                  </div>
-                  <div className="input-icon position-relative w-120 me-2">
+                  <div className="dropdown me-3">
+                    <Link
+                      to="#"
+                      className="dropdown-toggle btn btn-white d-inline-flex align-items-center"
+                      data-bs-toggle="dropdown"
+                    >
+                       {dateRangeFilter === "all" ? "All Time" : 
+                        dateRangeFilter === "today" ? "Today" :
+                        dateRangeFilter === "yesterday" ? "Yesterday" :
+                        dateRangeFilter === "last7days" ? "Last 7 Days" :
+                        dateRangeFilter === "last30days" ? "Last 30 Days" :
+                        dateRangeFilter === "thismonth" ? "This Month" :
+                        dateRangeFilter === "lastmonth" ? "Last Month" :
+                        dateRangeFilter === "thisyear" ? "This Year" :
+                        dateRangeFilter === "custom" ? 
+                          (customDateRange && customDateRange.start && customDateRange.end ? 
+                            `${customDateRange.start} to ${customDateRange.end}` : 
+                            "Custom Range") : 
+                          "All Time"}
+                    </Link>
+                    <ul className="dropdown-menu dropdown-menu-end p-3">
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "all" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("all");
+                          }}
+                        >
+                          All Time
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "today" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("today");
+                          }}
+                        >
+                          Today
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "yesterday" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("yesterday");
+                          }}
+                        >
+                          Yesterday
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "last7days" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("last7days");
+                          }}
+                        >
+                          Last 7 Days
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "last30days" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("last30days");
+                          }}
+                        >
+                          Last 30 Days
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "thismonth" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("thismonth");
+                          }}
+                        >
+                          This Month
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "lastmonth" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("lastmonth");
+                          }}
+                        >
+                          Last Month
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${dateRangeFilter === "thisyear" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleDateRangeChange("thisyear");
+                          }}
+                        >
+                          This Year
+                        </Link>
+                      </li>
+                       <li><hr className="dropdown-divider" /></li>
+                       <li>
+                         <Link
+                           to="#"
+                           className={`dropdown-item rounded-1 ${dateRangeFilter === "custom" ? "active" : ""}`}
+                           onClick={(e) => {
+                             e.preventDefault();
+                             handleCustomRangeClick();
+                           }}
+                         >
+                           Custom Range
+                        </Link>
+                      </li>
+                    </ul>
+                   </div>
+                   {showCustomRange && (
+                     <div className="custom-range-picker p-2 border rounded bg-light me-3 d-inline-block">
+                       <div className="d-flex align-items-center gap-2">
+                         <span className="small text-muted">Select Range:</span>
+                         <RangePicker
+                           size="small"
+                           format="DD-MM-YYYY"
+                           placeholder={['Start Date', 'End Date']}
+                           style={{ width: 200 }}
+                           value={customDateRange ? [
+                             dayjs(customDateRange.start), 
+                             dayjs(customDateRange.end)
+                           ] : null}
+                           onChange={handleCustomDateRangeChange}
+                         />
+                         <button 
+                           className="btn btn-sm btn-outline-secondary"
+                           onClick={() => {
+                             setShowCustomRange(false);
+                             setCustomDateRange(null);
+                             setDateRangeFilter("all");
+                           }}
+                         >
+                           ×
+                         </button>
+                       </div>
+                     </div>
+                   )}
+                  <div className="input-icon position-relative w-120 me-2 d-flex align-items-center">
                     <span className="input-icon-addon">
                       <i className="ti ti-calendar" />
                     </span>
                     <DatePicker
                       className="form-control datetimepicker"
-                      format={{
-                        format: "DD-MM-YYYY",
-                        type: "mask",
+                      format="DD-MM-YYYY"
+                      placeholder="Due Date"
+                      value={dueDateFilter ? dayjs(dueDateFilter) : null}
+                      onChange={(date: any) => {
+                        if (date) {
+                          // Convert to YYYY-MM-DD format for filtering
+                          const formattedDate = date.format('YYYY-MM-DD');
+                          handleDueDateChange(formattedDate);
+                        } else {
+                          handleDueDateChange(null);
+                        }
                       }}
-                      placeholder="DD-MM-YYYY"
                     />
+                    {dueDateFilter && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-light border-0 ms-2 d-flex align-items-center justify-content-center"
+                        onClick={() => handleDueDateChange(null)}
+                        title="Clear due date filter"
+                        style={{ 
+                          fontSize: '14px', 
+                          width: '28px', 
+                          height: '28px', 
+                          padding: '0', 
+                          lineHeight: '1',
+                          borderRadius: '50%',
+                          backgroundColor: '#f8f9fa',
+                          border: '1px solid #dee2e6',
+                          color: '#6c757d',
+                          transition: 'all 0.2s ease',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        }}
+                        onMouseEnter={(e) => {
+                          const target = e.target as HTMLButtonElement;
+                          target.style.backgroundColor = '#e9ecef';
+                          target.style.color = '#495057';
+                          target.style.transform = 'scale(1.05)';
+                        }}
+                        onMouseLeave={(e) => {
+                          const target = e.target as HTMLButtonElement;
+                          target.style.backgroundColor = '#f8f9fa';
+                          target.style.color = '#6c757d';
+                          target.style.transform = 'scale(1)';
+                        }}
+                      >
+                        <i className="ti ti-x" style={{ fontSize: '12px' }}></i>
+                      </button>
+                    )}
                   </div>
                   <div className="dropdown me-2">
                     <Link
@@ -112,41 +765,35 @@ const TodoList = () => {
                       className="dropdown-toggle btn btn-white d-inline-flex align-items-center"
                       data-bs-toggle="dropdown"
                     >
-                      Tags
+                      {selectedTag === "all" ? "Tags" : selectedTag}
                     </Link>
-                    <ul className="dropdown-menu  dropdown-menu-end p-3">
+                    <ul className="dropdown-menu dropdown-menu-end p-3">
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${selectedTag === "all" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleTagChange("all");
+                          }}
                         >
                           All Tags
                         </Link>
                       </li>
-                      <li>
+                      {availableTags.map((tag) => (
+                        <li key={tag}>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
-                        >
-                          Urgent
+                            className={`dropdown-item rounded-1 ${selectedTag === tag ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleTagChange(tag);
+                            }}
+                          >
+                            {tag}
                         </Link>
                       </li>
-                      <li>
-                        <Link
-                          to="#"
-                          className="dropdown-item rounded-1"
-                        >
-                          High
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          to="#"
-                          className="dropdown-item rounded-1"
-                        >
-                          Medium
-                        </Link>
-                      </li>
+                      ))}
                     </ul>
                   </div>
                   <div className="dropdown me-2">
@@ -155,41 +802,35 @@ const TodoList = () => {
                       className="dropdown-toggle btn btn-white d-inline-flex align-items-center"
                       data-bs-toggle="dropdown"
                     >
-                      Assignee
+                      {selectedAssignee === "all" ? "Assignee" : selectedAssignee}
                     </Link>
-                    <ul className="dropdown-menu  dropdown-menu-end p-3">
+                    <ul className="dropdown-menu dropdown-menu-end p-3">
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${selectedAssignee === "all" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleAssigneeChange("all");
+                          }}
                         >
-                          Sophie
+                          All Assignees
                         </Link>
                       </li>
-                      <li>
+                      {availableAssignees.map((assignee) => (
+                        <li key={assignee}>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
-                        >
-                          Cameron
+                            className={`dropdown-item rounded-1 ${selectedAssignee === assignee ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleAssigneeChange(assignee);
+                            }}
+                          >
+                            {assignee}
                         </Link>
                       </li>
-                      <li>
-                        <Link
-                          to="#"
-                          className="dropdown-item rounded-1"
-                        >
-                          Doris
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          to="#"
-                          className="dropdown-item rounded-1"
-                        >
-                          Rufana
-                        </Link>
-                      </li>
+                      ))}
                     </ul>
                   </div>
                   <div className="dropdown me-2">
@@ -198,13 +839,29 @@ const TodoList = () => {
                       className="dropdown-toggle btn btn-white d-inline-flex align-items-center"
                       data-bs-toggle="dropdown"
                     >
-                      Select Status
+                      {selectedStatus === "all" ? "Select Status" : selectedStatus}
                     </Link>
-                    <ul className="dropdown-menu  dropdown-menu-end p-3">
+                    <ul className="dropdown-menu dropdown-menu-end p-3">
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${selectedStatus === "all" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleStatusChange("all");
+                          }}
+                        >
+                          All Status
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="#"
+                          className={`dropdown-item rounded-1 ${selectedStatus === "completed" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleStatusChange("completed");
+                          }}
                         >
                           Completed
                         </Link>
@@ -212,7 +869,11 @@ const TodoList = () => {
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${selectedStatus === "pending" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleStatusChange("pending");
+                          }}
                         >
                           Pending
                         </Link>
@@ -220,7 +881,11 @@ const TodoList = () => {
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${selectedStatus === "inprogress" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleStatusChange("inprogress");
+                          }}
                         >
                           Inprogress
                         </Link>
@@ -228,7 +893,11 @@ const TodoList = () => {
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${selectedStatus === "onhold" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleStatusChange("onhold");
+                          }}
                         >
                           Onhold
                         </Link>
@@ -242,13 +911,19 @@ const TodoList = () => {
                       data-bs-toggle="dropdown"
                     >
                       <span className="fs-12 d-inline-flex me-1">Sort By : </span>
-                      Last 7 Days
+                      {sortBy === "last7days" ? "Last 7 Days" : 
+                       sortBy === "last1month" ? "Last 1 month" : 
+                       sortBy === "last1year" ? "Last 1 year" : "Last 7 Days"}
                     </Link>
-                    <ul className="dropdown-menu  dropdown-menu-end p-3">
+                    <ul className="dropdown-menu dropdown-menu-end p-3">
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${sortBy === "last7days" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSortChange("last7days");
+                          }}
                         >
                           Last 7 Days
                         </Link>
@@ -256,7 +931,11 @@ const TodoList = () => {
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${sortBy === "last1month" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSortChange("last1month");
+                          }}
                         >
                           Last 1 month
                         </Link>
@@ -264,7 +943,11 @@ const TodoList = () => {
                       <li>
                         <Link
                           to="#"
-                          className="dropdown-item rounded-1"
+                          className={`dropdown-item rounded-1 ${sortBy === "last1year" ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSortChange("last1year");
+                          }}
                         >
                           Last 1 year
                         </Link>
@@ -299,27 +982,54 @@ const TodoList = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr>
+                      {loading ? (
+                        <tr>
+                          <td colSpan={9} className="text-center py-4">
+                            <div className="spinner-border" role="status">
+                              <span className="visually-hidden">Loading...</span>
+                          </div>
+                        </td>
+                      </tr>
+                      ) : getFilteredTodos().length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="text-center py-4 text-muted">
+                            No todos found.
+                        </td>
+                      </tr>
+                      ) : (
+                        getFilteredTodos().map((todo: Todo, index: number) => {
+                          const progressPercentage = getProgressPercentage(todo);
+                          return (
+                            <tr key={todo._id}>
                         <td>
                           <div className="d-flex align-items-center">
                             <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
+                                    <input 
+                                      className="form-check-input" 
+                                      type="checkbox" 
+                                      checked={todo.completed}
+                                      onChange={() => toggleTodo(todo._id, todo.completed)}
+                                    />
                             </div>
                             <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
+                                    <i className={`ti ti-star${todo.completed ? '-filled filled' : ''}`} />
                             </span>
                             <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-danger me-2" />
+                                    <i className={`ti ti-square-rounded ${getPriorityColor(todo.priority)} me-2`} />
                             </span>
                           </div>
                         </td>
                         <td>
                           <p className="fw-medium text-dark">
-                            Respond to any pending messages
+                                  {todo.title}
                           </p>
                         </td>
                         <td>
-                          <span className="badge badge-info">Social</span>
+                                {todo.tag && (
+                                  <span className={`badge ${getTagBadgeClass(todo.tag)}`}>
+                                    {todo.tag}
+                            </span>
+                                )}
                         </td>
                         <td>
                           <div className="avatar-list-stacked avatar-group-sm">
@@ -330,44 +1040,30 @@ const TodoList = () => {
                                 alt="img"
                               />
                             </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-29.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-16.jpg"
-                                alt="img"
-                              />
-                            </span>
                           </div>
                         </td>
-                        <td>14/01/2024</td>
+                              <td>{formatDate(todo.createdAt)}</td>
                         <td>
-                          <span className="d-block mb-1">Progress : 100%</span>
+                                <span className="d-block mb-1">Progress : {progressPercentage}%</span>
                           <div
                             className="progress progress-xs flex-grow-1 mb-2"
                             style={{ width: 190 }}
                           >
                             <div
-                              className="progress-bar bg-success rounded"
+                                    className={`progress-bar ${getProgressBarColor(progressPercentage)} rounded`}
                               role="progressbar"
-                              style={{ width: "100%" }}
-                              aria-valuenow={30}
+                                    style={{ width: `${progressPercentage}%` }}
+                                    aria-valuenow={progressPercentage}
                               aria-valuemin={0}
                               aria-valuemax={100}
                             />
                           </div>
                         </td>
-                        <td>14/01/2024</td>
+                              <td>{todo.dueDate ? formatDate(todo.dueDate) : '-'}</td>
                         <td>
-                          <span className="badge badge-soft-success d-inline-flex align-items-center">
+                                <span className={`${getStatusBadgeClass(todo.completed)}`}>
                             <i className="ti ti-circle-filled fs-5 me-1" />
-                            Completed
+                                  {todo.completed ? 'Completed' : 'Pending'}
                           </span>
                         </td>
                         <td>
@@ -375,850 +1071,37 @@ const TodoList = () => {
                             <Link
                               to="#"
                               className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
+                              data-bs-toggle="modal"
+                              data-bs-target="#view-note-units"
+                              onClick={() => handleViewClick(todo)}
+                              title="View todo"
+                            >
+                              <i className="ti ti-eye" />
+                            </Link>
+                            <Link
+                              to="#"
+                              className="btn btn-sm btn-icon"
+                              data-bs-toggle="modal"
+                              data-bs-target="#edit-note-units"
+                              onClick={() => handleEditClick(todo)}
+                              title="Edit todo"
                             >
                               <i className="ti ti-edit" />
                             </Link>
-                            <Link
-                              to="#"
+                            <button
+                              type="button"
                               className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
+                              onClick={() => handleDeleteClick(todo._id)}
+                              title="Delete todo"
                             >
                               <i className="ti ti-trash" />
-                            </Link>
+                            </button>
                           </div>
                         </td>
                       </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star-filled filled" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-purple me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Update calendar and schedule
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge badge-purple">Meetings</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-01.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-02.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-03.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>21/01/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 15%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-danger rounded"
-                              role="progressbar"
-                              style={{ width: "15%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>21/01/2024</td>
-                        <td>
-                          <span className="badge badge-soft-dark d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Pending
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-purple me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Respond to any pending messages
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge bg-pink">Research</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-04.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-05.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-06.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>20/02/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 45%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-warning rounded"
-                              role="progressbar"
-                              style={{ width: "45%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>20/02/2024</td>
-                        <td>
-                          <span className="badge bg-transparent-purple d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Inprogress
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-warning me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Attend team meeting at 10:00 AM
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge bg-skyblue">Web Design</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-05.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-06.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-07.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>15/03/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 40%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-warning rounded"
-                              role="progressbar"
-                              style={{ width: "40%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>15/03/2024</td>
-                        <td>
-                          <span className="badge bg-transparent-purple d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Inprogress
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-purple me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Check and respond to emails
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge badge-secondary">Reminder</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-08.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-09.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-10.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>12/04/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 65%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-purple rounded"
-                              role="progressbar"
-                              style={{ width: "65%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>12/04/2024</td>
-                        <td>
-                          <span className="badge badge-soft-dark d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Pending
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-warning me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Coordinate with department head
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge badge-danger">Internal</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-11.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-12.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-13.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>20/05/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 85%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-pink rounded"
-                              role="progressbar"
-                              style={{ width: "85%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>20/05/2024</td>
-                        <td>
-                          <span className="badge bg-soft-pink d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Onhold
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-success me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Plan tasks for the next day
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge badge-info">Social</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-14.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-15.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-16.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>06/07/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 100%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-success rounded"
-                              role="progressbar"
-                              style={{ width: "100%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>06/07/2024</td>
-                        <td>
-                          <span className="badge badge-soft-success d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Completed
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-success me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Finalize project proposal
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge badge-success">Projects</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-17.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-18.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-19.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>02/09/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 65%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-danger rounded"
-                              role="progressbar"
-                              style={{ width: "65%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>02/09/2024</td>
-                        <td>
-                          <span className="badge bg-soft-pink d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Onhold
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-purple me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Submit to supervisor by EOD
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge badge-secondary">Reminder</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-20.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-21.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-22.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>15/11/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 75%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-purple rounded"
-                              role="progressbar"
-                              style={{ width: "75%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>15/11/2024</td>
-                        <td>
-                          <span className="badge bg-transparent-purple d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Inprogress
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <div className="form-check form-check-md">
-                              <input className="form-check-input" type="checkbox" />
-                            </div>
-                            <span className="mx-2 d-flex align-items-center rating-select">
-                              <i className="ti ti-star" />
-                            </span>
-                            <span className="d-flex align-items-center">
-                              <i className="ti ti-square-rounded text-success me-2" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <p className="fw-medium text-dark">
-                            Prepare presentation slides
-                          </p>
-                        </td>
-                        <td>
-                          <span className="badge bg-pink">Research</span>
-                        </td>
-                        <td>
-                          <div className="avatar-list-stacked avatar-group-sm">
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-23.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-24.jpg"
-                                alt="img"
-                              />
-                            </span>
-                            <span className="avatar avatar-rounded">
-                              <ImageWithBasePath
-                                className="border border-white"
-                                src="assets/img/profiles/avatar-25.jpg"
-                                alt="img"
-                              />
-                            </span>
-                          </div>
-                        </td>
-                        <td>10/12/2024</td>
-                        <td>
-                          <span className="d-block mb-1">Progress : 90%</span>
-                          <div
-                            className="progress progress-xs flex-grow-1 mb-2"
-                            style={{ width: 190 }}
-                          >
-                            <div
-                              className="progress-bar bg-pink rounded"
-                              role="progressbar"
-                              style={{ width: "90%" }}
-                              aria-valuenow={30}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                            />
-                          </div>
-                        </td>
-                        <td>10/12/2024</td>
-                        <td>
-                          <span className="badge badge-soft-dark d-inline-flex align-items-center">
-                            <i className="ti ti-circle-filled fs-5 me-1" />
-                            Pending
-                          </span>
-                        </td>
-                        <td>
-                          <div className="d-flex align-items-center">
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#edit_todo"
-                            >
-                              <i className="ti ti-edit" />
-                            </Link>
-                            <Link
-                              to="#"
-                              className="btn btn-sm btn-icon"
-                              data-bs-toggle="modal" data-inert={true}
-                              data-bs-target="#delete_modal"
-                            >
-                              <i className="ti ti-trash" />
-                            </Link>
-                          </div>
-                        </td>
-                      </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1239,7 +1122,14 @@ const TodoList = () => {
         {/* /Page Wrapper */}
       </>
 
-      <TodoModal />
+      <TodoModal 
+        onTodoAdded={handleTodoRefresh}
+        selectedTodoToDelete={selectedTodoToDelete}
+        onDeleteTodo={handleDeleteTodo}
+        selectedTodoToEdit={selectedTodoToEdit}
+        onTodoUpdated={handleTodoRefresh}
+        selectedTodoToView={selectedTodoToView}
+      />
     </>
   );
 };

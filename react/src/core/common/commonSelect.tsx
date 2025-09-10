@@ -12,7 +12,7 @@ export interface SelectProps {
   className?: string;
   onChange?: (selectedOption: Option | null) => void;
   isSearchable?: boolean;
-  disabled?: boolean; // <-- Add disabled here
+  disabled?: boolean;
 }
 
 const CommonSelect: React.FC<SelectProps> = ({
@@ -21,17 +21,24 @@ const CommonSelect: React.FC<SelectProps> = ({
   className,
   onChange,
   isSearchable = true,
-  disabled = false, // <-- Default false
+  disabled = false,
 }) => {
   const findOptionByLabel = (label: string): Option | null => {
     return options.find((opt) => opt.label === label) || null;
   };
 
+  const findOptionByValue = (value: string): Option | null => {
+    return options.find((opt) => opt.value === value) || null;
+  };
+
   const getInitialValue = (): Option | null => {
     if (!defaultValue) return null;
+    
     if (typeof defaultValue === "string") {
-      return findOptionByLabel(defaultValue);
+      // Try to find by label first, then by value
+      return findOptionByLabel(defaultValue) || findOptionByValue(defaultValue) || null;
     }
+
     return defaultValue;
   };
 
@@ -41,23 +48,29 @@ const CommonSelect: React.FC<SelectProps> = ({
 
   const handleChange = (option: Option | null) => {
     setSelectedOption(option);
-    onChange?.(option);
+    if (onChange) {
+      onChange(option);
+    }
   };
 
   useEffect(() => {
-    setSelectedOption(getInitialValue());
+    const newValue = getInitialValue();
+    setSelectedOption(newValue);
   }, [defaultValue, options]);
 
   return (
     <Select
-      classNamePrefix="react-select"
-      className={className}
-      options={options}
       value={selectedOption}
       onChange={handleChange}
-      placeholder="Select"
+      options={options}
       isSearchable={isSearchable}
-      isDisabled={disabled} // <-- pass it here to react-select
+      className={className}
+      isDisabled={disabled}
+      placeholder="Select..."
+      isClearable
+      // Ensure we never render objects as children
+      getOptionLabel={(option: Option) => option.label || ""}
+      getOptionValue={(option: Option) => option.value || ""}
     />
   );
 };

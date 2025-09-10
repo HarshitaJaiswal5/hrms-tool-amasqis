@@ -38,6 +38,7 @@ export const all_routes = {
 
   //custom routes
   validate: "/validate",
+  clerk: "/clerk",
 
   //page module
   starter: "/starter",
@@ -309,7 +310,7 @@ export const all_routes = {
 
   clientgrid: "/clients-grid",
   clientlist: "/clients",
-  clientdetils: "/clients-details",
+  clientdetils: "/clients-details/:clientId",
   project: "/projects-grid",
   projectlist: "/projects",
   projectdetails: "/projects-details",

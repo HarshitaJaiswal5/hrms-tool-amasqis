@@ -1,5 +1,4 @@
 import * as adminService from "../../services/admin/admin.services.js";
-import { getTenantCollections } from "../../config/db.js";
 import { ObjectId } from "mongodb";
 
 const adminController = (socket, io) => {
@@ -262,10 +261,31 @@ const adminController = (socket, io) => {
       const companyId = validateCompanyAccess(socket);
       const userId = socket.user.sub;
       const filter = data?.filter || "all";
+      
       const result = await adminService.getTodos(companyId, userId, filter);
+      
       socket.emit("admin/dashboard/get-todos-response", result);
     } catch (error) {
+      console.error(`[GET TODOS] Error:`, error);
       socket.emit("admin/dashboard/get-todos-response", {
+        done: false,
+        error: error.message,
+      });
+    }
+  });
+
+  // Get todo statistics
+  socket.on("admin/dashboard/get-todo-statistics", async (data) => {
+    try {
+      const companyId = validateCompanyAccess(socket);
+      const filter = data?.filter || "all";
+      
+      const result = await adminService.getTodoStatistics(companyId, filter);
+      
+      socket.emit("admin/dashboard/get-todo-statistics-response", result);
+    } catch (error) {
+      console.error(`[GET TODO STATISTICS] Error:`, error);
+      socket.emit("admin/dashboard/get-todo-statistics-response", {
         done: false,
         error: error.message,
       });
@@ -325,7 +345,95 @@ const adminController = (socket, io) => {
       });
     }
   });
+  // Get all users (employees and clients combined)
+socket.on("admin/users/get", async (filters) => { // Accept filters here
+  try {
+    const companyId = validateCompanyAccess(socket);
+    const result = await adminService.getAllUsers(companyId, filters); // Pass filters to the service
+    socket.emit("admin/users/get-response", result);
+  } catch (error) {
+    socket.emit("admin/users/get-response", {
+      done: false,
+      error: error.message,
+    });
+  }
+});
 
+// Create a new user
+socket.on("admin/users/create", async (userData) => {
+  try {
+    // const companyId = validateCompanyAccess(socket); // Temporarily disabled for testing
+    const companyId = validateCompanyAccess(socket);
+    const result = await adminService.createUser(companyId, userData);
+
+    // Respond directly to the sender for immediate feedback
+    socket.emit("admin/users/create-response", result);
+
+    // If successful, fetch the updated list and broadcast it to all admins
+    if (result.done) {
+      const updatedUserList = await adminService.getAllUsers(companyId);
+      io.to(`admin_room_${companyId}`).emit(
+        "admin/users/list-update",
+        updatedUserList
+      );
+    }
+  } catch (error) {
+    socket.emit("admin/users/create-response", {
+      done: false,
+      error: error.message,
+    });
+  }
+});
+
+// Update an existing user
+socket.on("admin/users/update", async (data) => {
+  try {
+    const { userId, updatedData } = data;
+    // const companyId = validateCompanyAccess(socket); // Temporarily disabled for testing
+    const companyId = validateCompanyAccess(socket);
+    const result = await adminService.updateUser(companyId, userId, updatedData);
+
+    socket.emit("admin/users/update-response", result);
+
+    if (result.done) {
+      const updatedUserList = await adminService.getAllUsers(companyId);
+      io.to(`admin_room_${companyId}`).emit(
+        "admin/users/list-update",
+        updatedUserList
+      );
+    }
+  } catch (error) {
+    socket.emit("admin/users/update-response", {
+      done: false,
+      error: error.message,
+    });
+  }
+});
+
+// Delete a user
+socket.on("admin/users/delete", async (data) => {
+  try {
+    const { userId } = data;
+    // const companyId = validateCompanyAccess(socket); // Temporarily disabled for testing
+    const companyId = validateCompanyAccess(socket);
+    const result = await adminService.deleteUser(companyId, userId);
+
+    socket.emit("admin/users/delete-response", result);
+
+    if (result.done) {
+      const updatedUserList = await adminService.getAllUsers(companyId);
+      io.to(`admin_room_${companyId}`).emit(
+        "admin/users/list-update",
+        updatedUserList
+      );
+    }
+  } catch (error) {
+    socket.emit("admin/users/delete-response", {
+      done: false,
+      error: error.message,
+    });
+  }
+});
   // Get all dashboard data at once
   socket.on("admin/dashboard/get-all-data", async (data = {}) => {
     try {
@@ -409,11 +517,13 @@ const adminController = (socket, io) => {
     "admin/dashboard/add-todo",
     withRateLimit(async (todoData) => {
       try {
+        console.log("Add todo request received:", { todoData, socketId: socket.id });
         const companyId = validateCompanyAccess(socket);
         const userId = socket.user.sub;
 
         // SECURITY: Input validation
         if (!todoData || typeof todoData !== "object") {
+          console.error("Invalid todo data:", todoData);
           throw new Error("Invalid todo data");
         }
 
@@ -429,9 +539,16 @@ const adminController = (socket, io) => {
             ? todoData.description.trim().substring(0, 1000)
             : "",
           tag: todoData.tag ? todoData.tag.trim().substring(0, 50) : "",
-          priority: ["low", "medium", "high"].includes(todoData.priority)
-            ? todoData.priority
-            : "medium",
+          priority: (() => {
+            const priority = todoData.priority?.toLowerCase();
+            console.log("Priority validation:", { original: todoData.priority, lowercase: priority });
+            const isValid = ["low", "medium", "high"].includes(priority);
+            const result = isValid 
+              ? todoData.priority.charAt(0).toUpperCase() + todoData.priority.slice(1).toLowerCase()
+              : "Medium";
+            console.log("Priority result:", result);
+            return result;
+          })(),
           dueDate:
             todoData.dueDate && !isNaN(new Date(todoData.dueDate))
               ? new Date(todoData.dueDate)
@@ -441,21 +558,11 @@ const adminController = (socket, io) => {
             : null,
         };
 
-        const collections = getTenantCollections(companyId);
-        const newTodo = {
-          ...sanitizedTodoData,
-          userId,
-          createdAt: new Date(),
-          completed: false,
-          isDeleted: false,
-        };
+        console.log("Calling adminService.addTodo with:", { companyId, userId, sanitizedTodoData });
+        const result = await adminService.addTodo(companyId, userId, sanitizedTodoData);
+        console.log("Add todo service result:", result);
 
-        const result = await collections.todos.insertOne(newTodo);
-
-        socket.emit("admin/dashboard/add-todo-response", {
-          done: true,
-          data: { ...newTodo, _id: result.insertedId },
-        });
+        socket.emit("admin/dashboard/add-todo-response", result);
 
         // Broadcast updated todos to admin room (get all todos for real-time sync)
         const updatedTodos = await adminService.getTodos(
@@ -525,9 +632,9 @@ const adminController = (socket, io) => {
               sanitizedUpdates[key] = todoData[key].trim().substring(0, 50);
             } else if (
               key === "priority" &&
-              ["low", "medium", "high"].includes(todoData[key])
+              ["low", "medium", "high"].includes(todoData[key]?.toLowerCase())
             ) {
-              sanitizedUpdates[key] = todoData[key];
+              sanitizedUpdates[key] = todoData[key].charAt(0).toUpperCase() + todoData[key].slice(1).toLowerCase();
             } else if (key === "dueDate" && !isNaN(new Date(todoData[key]))) {
               sanitizedUpdates[key] = new Date(todoData[key]);
             } else if (
@@ -539,21 +646,9 @@ const adminController = (socket, io) => {
           }
         });
 
-        const collections = getTenantCollections(companyId);
+        const result = await adminService.updateTodo(companyId, todoData.id, sanitizedUpdates);
 
-        const result = await collections.todos.updateOne(
-          { _id: new ObjectId(todoData.id), userId }, // Ensure user can only update their own todos
-          { $set: { ...sanitizedUpdates, updatedAt: new Date() } }
-        );
-
-        if (result.matchedCount === 0) {
-          throw new Error("Todo not found or unauthorized");
-        }
-
-        socket.emit("admin/dashboard/update-todo-response", {
-          done: true,
-          data: result,
-        });
+        socket.emit("admin/dashboard/update-todo-response", result);
 
         // Broadcast updated todos to admin room (get all todos for real-time sync)
         const updatedTodos = await adminService.getTodos(
@@ -591,21 +686,9 @@ const adminController = (socket, io) => {
         throw new Error("Invalid todo ID format");
       }
 
-      const collections = getTenantCollections(companyId);
+      const result = await adminService.deleteTodo(companyId, todoId);
 
-      const result = await collections.todos.updateOne(
-        { _id: new ObjectId(todoId), userId }, // Ensure user can only delete their own todos
-        { $set: { isDeleted: true, deletedAt: new Date() } }
-      );
-
-      if (result.matchedCount === 0) {
-        throw new Error("Todo not found or unauthorized");
-      }
-
-      socket.emit("admin/dashboard/delete-todo-response", {
-        done: true,
-        data: result,
-      });
+      socket.emit("admin/dashboard/delete-todo-response", result);
 
       // Broadcast updated todos to admin room (get all todos for real-time sync)
       const updatedTodos = await adminService.getTodos(
@@ -646,34 +729,9 @@ const adminController = (socket, io) => {
           throw new Error("Invalid todo ID format");
         }
 
-        const collections = getTenantCollections(companyId);
+        const result = await adminService.deleteTodoPermanently(companyId, todoId);
 
-        // Check if the todo exists and belongs to the user before deleting
-        const todoExists = await collections.todos.findOne({
-          _id: new ObjectId(todoId),
-          userId,
-        });
-        console.log(`[DELETE TODO] Todo exists:`, todoExists);
-
-        if (!todoExists) {
-          throw new Error("Todo not found or unauthorized");
-        }
-
-        const result = await collections.todos.deleteOne({
-          _id: new ObjectId(todoId),
-          userId, // Ensure user can only delete their own todos
-        });
-
-        console.log(`[DELETE TODO] Delete result:`, result);
-
-        if (result.deletedCount === 0) {
-          throw new Error("Failed to delete todo");
-        }
-
-        socket.emit("admin/dashboard/delete-todo-permanently-response", {
-          done: true,
-          data: result,
-        });
+        socket.emit("admin/dashboard/delete-todo-permanently-response", result);
 
         // Broadcast updated todos to admin room (get all todos for real-time sync)
         const updatedTodos = await adminService.getTodos(

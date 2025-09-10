@@ -32,6 +32,7 @@ export const getTenantCollections = (tenantDbName) => {
     stats: db.collection("stats"),
     companies: db.collection("companies"),
     details: db.collection("details"),     // for company details
+    leads: db.collection("leads"),
 
     // Admin dashboard collections
     employees: db.collection("employees"),
@@ -64,6 +65,7 @@ export const getTenantCollections = (tenantDbName) => {
     pipelines: db.collection("pipelines"),
     stages: db.collection("stages"),
 
+
     // hr employee section collection
     hr: db.collection("hr"),   
     permissions:  db.collection("permissions"),
@@ -71,6 +73,17 @@ export const getTenantCollections = (tenantDbName) => {
     designations: db.collection("designation"),
     assets: db.collection("assets"),
 
+
+
+    
+    //Chat Collections
+    conversations: db.collection("conversations"),
+    messages: db.collection("messages"),
+    
+    //Social Feed
+    socialFeeds: db.collection("socialFeeds"),
+    follows: db.collection("follows"),
+    hashtags: db.collection("hashtags"),
 
   };
 };

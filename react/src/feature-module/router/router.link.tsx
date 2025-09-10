@@ -44,6 +44,7 @@ import Error500 from "../pages/error/error-500";
 import UnderMaintenance from "../pages/underMaintenance";
 import Email from "../application/email";
 import Chat from "../application/chat";
+import FunctionalChat from "../application/functional-chat";
 import CallHistory from "../application/call/callHistory";
 import FileManager from "../application/fileManager";
 import MembershipTransaction from "../membership/membershiptrasaction";
@@ -175,7 +176,7 @@ import Page from "../content/page";
 import Assets from "../administration/asset";
 import AssetsCategory from "../administration/asset-category";
 import Knowledgebase from "../administration/help-support/knowledgebase";
-import Activity from "../administration/help-support/activity";
+import Activity from "../crm/activities/activity";
 import Users from "../administration/user-management/users";
 import RolesPermission from "../administration/user-management/rolePermission";
 import Categories from "../accounting/categories";
@@ -205,9 +206,9 @@ import CandidateGrid from "../recruitment/candidates/candidategrid";
 import CandidateKanban from "../recruitment/candidates/candidatekanban";
 import CandidatesList from "../recruitment/candidates/candidatelist";
 import RefferalList from "../recruitment/refferal/refferallist";
-import ClienttGrid from "../projects/clinet/clienttgrid";
-import ClientList from "../projects/clinet/clientlist";
-import ClientDetails from "../projects/clinet/clientdetails";
+import ClienttGrid from "../projects/client/clienttgrid";
+import ClientList from "../projects/client/clientlist";
+import ClientDetails from "../projects/client/clientdetails";
 import Project from "../projects/project/project";
 import ProjectDetails from "../projects/project/projectdetails";
 import ProjectList from "../projects/project/projectlist";
@@ -294,6 +295,7 @@ import Invoices from "../finance-accounts/sales/invoices";
 
 // Custom route
 import Validate from "../auth/login/validate";
+import ClerkDash from "../clerk/Clerkdash";
 const routes = all_routes;
 
 export const publicRoutes = [
@@ -334,6 +336,11 @@ export const publicRoutes = [
     roles: ["public"],
   },
   {
+    path: routes.clerk,
+    element: <ClerkDash />,
+    roles: ["admin"],
+  },
+  {
     path: routes.estimate,
     element: <Extimates />,
     roles: ["hr"],
@@ -372,7 +379,7 @@ export const publicRoutes = [
   //Application
   {
     path: routes.chat,
-    element: <Chat />,
+    element: <FunctionalChat />,
     route: Route,
     roles: ["public"],
   },
@@ -727,7 +734,7 @@ export const publicRoutes = [
   },
   {
     path: routes.chat,
-    element: <Chat />,
+    element: <FunctionalChat />,
     route: Route,
     roles: ["public"],
   },
@@ -1608,7 +1615,7 @@ export const publicRoutes = [
     roles: ["public"],
   },
   {
-    path: routes.clientdetils,
+    path: "/clients-details/:clientId",
     element: <ClientDetails />,
     route: Route,
     roles: ["public"],
