@@ -7,9 +7,8 @@ import { maskAccountNumber } from "../../utils/maskAccNo.js"
 export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
   try {
     const collections = getTenantCollections(companyId);
-
     const hrCount = await collections.hr.countDocuments({
-      _id: new ObjectId(hrId),
+      userId: hrId,
     });
 
     if (hrCount === 0) {
@@ -28,7 +27,7 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
     }
 
     const baseMatch = {};
-    if (filters.status && ["active", "inactive"].includes(filters.status)) {
+    if (filters.status && ["active", "inactive", "Active", "Inactive"].includes(filters.status)) {
       baseMatch.status = filters.status;
     }
     if (filters.departmentId && typeof filters.departmentId === "string") {
@@ -120,8 +119,8 @@ export const getEmployeesStats = async (companyId, hrId, filters = {}) => {
       newJoinersCount,
     ] = await Promise.all([
       collections.employees.countDocuments({}),
-      collections.employees.countDocuments({ status: "Active" }),
-      collections.employees.countDocuments({ status: "Inactive" }),
+      collections.employees.countDocuments({ status: { $in: ["Active", "active"] } }),
+      collections.employees.countDocuments({ status: { $in: ["Inactive", "inactive"] } }),
       collections.employees.countDocuments({
         dateOfJoining: {
           $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
@@ -157,7 +156,7 @@ export const getEmployeeGridsStats = async (companyId, hrId, filters) => {
 
     // Validate HR
     const hrCount = await collections.hr.countDocuments({
-      _id: new ObjectId(hrId),
+      userId: hrId,
     });
     if (hrCount === 0) {
       console.warn("HR not found in specified company");
@@ -180,8 +179,8 @@ export const getEmployeeGridsStats = async (companyId, hrId, filters) => {
     if (filters.status && ["active", "inactive"].includes(filters.status)) {
       baseMatch.status = filters.status;
     }
-    if (filters.departmentId && typeof filters.departmentId === "string") {
-      baseMatch.departmentId = filters.departmentId;
+    if (filters.designationId && typeof filters.designationId === "string") {
+      baseMatch.designationId = filters.designationId;
     }
 
     // Faceted aggregation pipeline
@@ -307,12 +306,12 @@ export const getEmployeeGridsStats = async (companyId, hrId, filters) => {
                 totalEmployees: { $sum: 1 },
                 activeCount: {
                   $sum: {
-                    $cond: [{ $eq: ["$status", "Active"] }, 1, 0]
+                    $cond: [{ $eq: [{ $toLower: "$status" }, "active"] }, 1, 0]
                   }
                 },
                 inactiveCount: {
                   $sum: {
-                    $cond: [{ $eq: ["$status", "Inactive"] }, 1, 0]
+                    $cond: [{ $eq: [{ $toLower: "$status" }, "inactive"] }, 1, 0]
                   }
                 },
                 newJoinersCount: {
@@ -381,7 +380,7 @@ export const updateEmployeeDetails = async (companyId, hrId, payload) => {
     }
     const collections = getTenantCollections(companyId);
     const hrCount = await collections.hr.countDocuments({
-      _id: new ObjectId(hrId)
+      userId: hrId
     });
 
     if (hrCount !== 1) {
@@ -568,7 +567,7 @@ export const deleteEmployee = async (companyId, hrId, employeeId) => {
     const collections = getTenantCollections(companyId);
 
     const [hrExists, empExists] = await Promise.all([
-      collections.hr.countDocuments({ _id: new ObjectId(hrId) }),
+      collections.hr.countDocuments({ userId: hrId }),
       collections.employees.countDocuments({ _id: new ObjectId(employeeId) })
     ]);
 
@@ -644,16 +643,23 @@ export const addEmployee = async (companyId, hrId, employeeData, permissionsData
     const collections = getTenantCollections(companyId);
 
     // Check HR exists
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({ userId: hrId });
     if (!hrExists) {
       return { done: false, error: "HR not found." };
     }
 
-    // Check email uniqueness (nested in contact)
-    const emailExists = await collections.employees.countDocuments({ "contact.email": employeeData.contact.email });
-    if (emailExists) {
-      return { done: false, error: "Employee email already exists." };
+    // Check email and phone number uniqueness (nested in contact)
+    const exists = await collections.employees.countDocuments({
+      $or: [
+        { "contact.email": employeeData.contact.email },
+        { "contact.phone": employeeData.contact.phone }
+      ]
+    });
+
+    if (exists) {
+      return { done: false, error: "Employee email or phone number already exists." };
     }
+
 
     // Hash password (nested in account)
     const saltRounds = 10;
@@ -668,7 +674,8 @@ export const addEmployee = async (companyId, hrId, employeeData, permissionsData
       },
       createdAt: new Date(),
       updatedAt: new Date(),
-      status: "Active"
+      createdBy: hrId,
+      status: "active"
     };
 
     const employeeResult = await collections.employees.insertOne(employeeToInsert);
@@ -704,7 +711,7 @@ export const addEmployee = async (companyId, hrId, employeeData, permissionsData
       : "Failed to add employee";
     return { done: false, error: errorMsg };
   }
-};
+}
 
 export const getEmployeeProjectsStats = async (companyId, hrId, employeeId) => {
   try {
@@ -1549,7 +1556,7 @@ export const getEmployeeDetails = async (companyId, hrId, employeeId) => {
     const collections = getTenantCollections(companyId);
     const employeeObjId = new ObjectId(employeeId);
 
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({ userId: hrId });
 
     if (!hrExists) {
       return { done: false, message: "HR not authorized" };
@@ -1562,7 +1569,7 @@ export const getEmployeeDetails = async (companyId, hrId, employeeId) => {
     if (!employee) {
       return { done: false, message: "Employee not found" };
     }
-    
+
     return {
       done: true,
       data: employee,

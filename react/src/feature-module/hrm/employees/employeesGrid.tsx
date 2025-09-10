@@ -37,7 +37,7 @@ interface Employee {
     companyName: string;
     departmentId: string;
     designationId: string;
-    status: 'Active' | 'Inactive';
+    status: 'Active' | 'Inactive' | 'active' | 'inactive';
     dateOfJoining: string | null;
     about: string;
     role: string;
@@ -139,6 +139,9 @@ const EmployeesGrid = () => {
     const [department, setDepartment] = useState<Option[]>([]);
     const [selectedDepartment, setSelectedDepartment] = useState<string>('');
     const [selectedDesignation, setSelectedDesignation] = useState<string>('');
+    const [filters, setFilters] = useState({ designationId: "" });
+    const [sortOrder, setSortOrder] = useState("");
+    const [sortedEmployee, setSortedEmployee] = useState<Employee[]>([]);
     const [stats, setStats] = useState<EmployeeStats>({
         totalEmployees: 0,
         activeCount: 0,
@@ -187,6 +190,7 @@ const EmployeesGrid = () => {
 
         socket.emit("hrm/employees/get-employee-grid-stats");
         socket.emit("hr/departments/get");
+        socket.emit("hrm/designations/get");
 
         const handleEmployeeResponse = (response: any) => {
             if (!isMounted) return;
@@ -374,6 +378,29 @@ const EmployeesGrid = () => {
         }
     }, [editingEmployee]);
 
+    const handleSort = (order: string) => {
+        setSortOrder(order);
+        if (!order) {
+            setSortedEmployee(employees);
+            return;
+        }
+        const sortedData = [...employees].sort((a, b) => {
+            console.log("from sorted data", employees);
+
+            const nameA = a.firstName.toLowerCase() || "a";
+            const nameB = b.firstName.toLowerCase() || "b";
+
+            if (order === "ascending") {
+                return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+            }
+            if (order === "descending") {
+                return nameA > nameB ? -1 : nameA < nameB ? 1 : 0;
+            }
+            return 0;
+        });
+        setSortedEmployee(sortedData); // may not need this later
+        setEmployees(sortedData);
+    };
     const getModalContainer = () => {
         const modalElement = document.getElementById('modal-datepicker');
         return modalElement ? modalElement : document.body;
@@ -440,8 +467,28 @@ const EmployeesGrid = () => {
         }
     };
 
-    // form functions
+    const applyFilters = (updatedFields: {
+        designationId?: string;
 
+    }) => {
+        try {
+            setFilters(prevFilters => {
+                const newFilters = { ...prevFilters, ...updatedFields };
+                if (socket) {
+                    socket.emit("hrm/employees/get-employee-grid-stats", { ...newFilters });
+                }
+                return newFilters;
+            });
+        } catch (error) {
+            console.error("Error applying filters:", error);
+        }
+    };
+
+    // form functions
+    const onSelectDesignation = (id: string) => {
+        console.log(id);
+        applyFilters({ designationId: id });
+    };
     // Validate form before submission
     const validateForm = (): boolean => {
         // Check required fields
@@ -1036,32 +1083,29 @@ const EmployeesGrid = () => {
                                             data-bs-toggle="dropdown"
                                         >
                                             Designation
+                                            {selectedDesignation
+                                                ? `: ${designation.find(des => des.value === selectedDesignation)?.label || "None"
+                                                }`
+                                                : ": None"}
                                         </Link>
-                                        <ul className="dropdown-menu  dropdown-menu-end p-3">
-                                            <li>
-                                                <Link
-                                                    to="#"
-                                                    className="dropdown-item rounded-1"
-                                                >
-                                                    Finance
-                                                </Link>
-                                            </li>
-                                            <li>
-                                                <Link
-                                                    to="#"
-                                                    className="dropdown-item rounded-1"
-                                                >
-                                                    Developer
-                                                </Link>
-                                            </li>
-                                            <li>
-                                                <Link
-                                                    to="#"
-                                                    className="dropdown-item rounded-1"
-                                                >
-                                                    Executive
-                                                </Link>
-                                            </li>
+                                        <ul className="dropdown-menu dropdown-menu-end p-3">
+                                            {designation
+                                                .filter(des => des.value)
+                                                .map(des => (
+                                                    <li key={des.value}>
+                                                        <Link
+                                                            to="#"
+                                                            className={`dropdown-item rounded-1${selectedDesignation === des.value ? " active" : ""}`}
+                                                            onClick={e => {
+                                                                e.preventDefault();
+                                                                setSelectedDesignation(des.value);
+                                                                onSelectDesignation(des.value);
+                                                            }}
+                                                        >
+                                                            {des.label}
+                                                        </Link>
+                                                    </li>
+                                                ))}
                                         </ul>
                                     </div>
                                     <div className="dropdown">
@@ -1070,24 +1114,35 @@ const EmployeesGrid = () => {
                                             className="dropdown-toggle btn btn-white d-inline-flex align-items-center"
                                             data-bs-toggle="dropdown"
                                         >
-                                            Sort By : Last 7 Days
+                                            Sort By{sortOrder ? `: ${sortOrder.charAt(0).toUpperCase() + sortOrder.slice(1)}` : ": None"}
                                         </Link>
                                         <ul className="dropdown-menu  dropdown-menu-end p-3">
                                             <li>
                                                 <Link
                                                     to="#"
                                                     className="dropdown-item rounded-1"
+                                                    onClick={() => handleSort("ascending")}
                                                 >
-                                                    Last 7 Days
+                                                    Ascending
                                                 </Link>
                                             </li>
                                             <li>
                                                 <Link
                                                     to="#"
                                                     className="dropdown-item rounded-1"
+                                                    onClick={() => handleSort("descending")}
                                                 >
-                                                    Ascending
+                                                    Descending
                                                 </Link>
+                                            </li>
+                                            <li>
+                                                <button
+                                                    type="button"
+                                                    className="dropdown-item rounded-1"
+                                                    onClick={() => handleSort("")}
+                                                >
+                                                    None
+                                                </button>
                                             </li>
                                         </ul>
                                     </div>
@@ -1130,8 +1185,7 @@ const EmployeesGrid = () => {
                                                 <div>
                                                     <Link
                                                         to={`${all_routes.employeedetails}/${_id}`}
-                                                        className={`avatar avatar-xl avatar-rounded border p-1 border-primary rounded-circle ${emp.status === "Active" ? "online" : "offline"  // or "inactive"
-                                                            }`}
+                                                        className={`avatar avatar-xl avatar-rounded border p-1 border-primary rounded-circle ${(emp.status === "Active") || (emp.status === "active") ? "online" : "offline"}`}
                                                     >
                                                         <ImageWithBasePath
                                                             src={avatarUrl || "assets/img/users/user-32.jpg"}

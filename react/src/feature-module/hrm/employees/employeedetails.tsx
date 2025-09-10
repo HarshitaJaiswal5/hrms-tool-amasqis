@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, } from 'react-router-dom'
 import PredefinedDateRanges from '../../../core/common/datePicker'
 import Table from "../../../core/common/dataTable/index";
 import { all_routes } from '../../router/all_routes';
@@ -165,9 +165,13 @@ const EmployeeDetails = () => {
     const [loading, setLoading] = useState(false);
     const [employee, setEmployee] = useState<Employee | null>(null);
     const socket = useSocket() as Socket | null;
+    const [passwordVisibility, setPasswordVisibility] = useState({
+        password: false,
+        confirmPassword: false,
+    });
 
     useEffect(() => {
-        if (!socket) return;
+        if (!socket || !employeeId) return;
 
         let isMounted = true;
 
@@ -207,14 +211,21 @@ const EmployeeDetails = () => {
             clearTimeout(timeoutId);
             socket.off("hrm/employees/get-details-response", handleDetailsResponse);
         };
-    }, [socket]);
+    }, [socket, employeeId]);
 
-    console.log("Employee from fetched", employee);
+    if (!employeeId) {
+        return (
+            <div className='alert alert-warning d-flex align-items-center justify-content-center pt-50 mt-5'>
+                <Link to={`/employees/`} className="btn btn-outline-primary btn-sm">
+                    Go to Employees List
+                </Link>
+            </div>
+        )
+    }
 
-    const [passwordVisibility, setPasswordVisibility] = useState({
-        password: false,
-        confirmPassword: false,
-    });
+    if (!employee) {
+        return <p>No Data found for this employee</p>
+    }
 
     const togglePasswordVisibility = (field: PasswordField) => {
         setPasswordVisibility((prevState) => ({
@@ -341,6 +352,15 @@ const EmployeeDetails = () => {
         return `${day} ${month} ${year}`;
     }
 
+    if (!employee) {
+        return (
+            <div>
+                <p>Employee not found.</p>
+                <Link to={`${all_routes}/employees/`}>Go to Employees List</Link>
+            </div>
+        );
+    }
+
     return (
         <>
             {/* Page Wrapper */}
@@ -396,7 +416,7 @@ const EmployeeDetails = () => {
                                                 {employee?.role}
                                             </span>
                                             <span className="badge badge-soft-secondary fw-medium">
-                                                 <i className="ti ti-point-filled me-1" />
+                                                <i className="ti ti-point-filled me-1" />
                                                 Years of Experience: {employee?.yearsOfExperience || '-'}
                                             </span>
                                         </div>
@@ -987,7 +1007,7 @@ const EmployeeDetails = () => {
                                                             id="myTab"
                                                             role="tablist"
                                                         >
-                                                             {/* Commented out Projects tab */}
+                                                            {/* Commented out Projects tab */}
                                                             {/* <li className="nav-item" role="presentation">
                                                                 <button
                                                                     className="nav-link active"
@@ -1024,7 +1044,7 @@ const EmployeeDetails = () => {
                                                             aria-labelledby="info-tab2"
                                                             tabIndex={0}
                                                         > */}
-                                                            {/* <div className="row">
+                                                        {/* <div className="row">
                                                                 <div className="col-md-6 d-flex">
                                                                     <div className="card flex-fill mb-4 mb-md-0">
                                                                         <div className="card-body">

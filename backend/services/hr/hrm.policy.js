@@ -9,7 +9,7 @@ export const addPolicy = async (companyId, hrId, policyData) => {
         }
 
         const collections = getTenantCollections(companyId);
-        const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+        const hrExists = await collections.hr.countDocuments({ userId: hrId });
         if (!hrExists) return { done: false, error: "HR not found" };
 
         if (!policyData.policyName || !policyData.department || !policyData.effectiveDate || !policyData.policyDescription) {
@@ -24,7 +24,7 @@ export const addPolicy = async (companyId, hrId, policyData) => {
             department: policyData.department,
             policyDescription: policyData.policyDescription,
             effectiveDate: new Date(policyData.effectiveDate),
-            createdBy: new ObjectId(hrId),
+            createdBy: hrId,
             createdAt: new Date(),
         });
 
@@ -54,7 +54,7 @@ export const displayPolicy = async (companyId, hrId, filters = {}) => {
 
         const collections = getTenantCollections(companyId);
         const hrExists = await collections.hr.countDocuments({
-            _id: new ObjectId(hrId),
+            userId: hrId
         });
         if (hrExists !== 1) {
             return { done: false, error: "HR not found" };
@@ -102,7 +102,7 @@ export const updatePolicy = async (companyId, hrId, payload) => {
         }
 
         const collections = getTenantCollections(companyId);
-        const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+        const hrExists = await collections.hr.countDocuments({ userId: hrId});
         if (!hrExists) return { done: false, error: "HR not found" };
 
         if (!payload.policyId) {
@@ -120,7 +120,7 @@ export const updatePolicy = async (companyId, hrId, payload) => {
                     department: payload.department,
                     effectiveDate: payload.effectiveDate,
                     policyDescription: payload.policyDescription,
-                    updatedBy: new ObjectId(hrId),
+                    updatedBy: hrId,
                     updatedAt: new Date()
                 }
             }
@@ -151,7 +151,7 @@ export const deletePolicy = async (companyId, hrId, policyId) => {
         }
 
         const collections = getTenantCollections(companyId);
-        const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+        const hrExists = await collections.hr.countDocuments({ userId: hrId });
         if (!hrExists) return { done: false, error: "HR not found" };
 
         const result = await collections.policy.deleteOne({

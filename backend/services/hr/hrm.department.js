@@ -9,7 +9,7 @@ export const allDepartments = async (companyId, hrId) => {
     }
 
     const collections = getTenantCollections(companyId);
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({ userId: hrId });
     if (!hrExists) return { done: false, error: "HR not found" };
 
     const result = await collections.departments
@@ -41,7 +41,7 @@ export const addDepartment = async (companyId, hrId, payload) => {
     }
 
     const collections = getTenantCollections(companyId);
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({  userId: hrId });
     if (!hrExists) return { done: false, message: "HR doesn't exist" };
 
     const departmentExists = await collections.departments.countDocuments({
@@ -54,7 +54,7 @@ export const addDepartment = async (companyId, hrId, payload) => {
     const newDepartment = {
       department: payload.department,
       status: payload.status || "active",
-      createdBy: new ObjectId(hrId),
+      createdBy: hrId,
       createdAt: new Date(),
     };
 
@@ -68,7 +68,6 @@ export const addDepartment = async (companyId, hrId, payload) => {
     return {
       done: false,
       error: "Internal server error",
-      systemError: error.message
     };
   }
 };
@@ -78,11 +77,9 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
     if (!companyId || !hrId) {
       return { done: false, error: "Missing required fields" };
     }
-    console.log("*****************************");
-
 
     const collections = getTenantCollections(companyId);
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({ userId: hrId  });
     if (!hrExists) return { done: false, message: "HR doesn't exist" };
 
     const query = {};
@@ -142,6 +139,7 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
     ];
 
     const departments = await collections.departments.aggregate(pipeline).toArray();
+console.log(departments);
 
     return {
       done: true,
@@ -149,6 +147,8 @@ export const displayDepartment = async (companyId, hrId, filters = {}) => {
       message: "Departments retrieved successfully",
     };
   } catch (error) {
+    console.log(error);
+    
     return {
       done: false,
       error: "Internal server error",
@@ -165,7 +165,7 @@ export const updateDepartment = async (companyId, hrId, payload) => {
     const collections = getTenantCollections(companyId);
     const departmentId = new ObjectId(payload.departmentId);
 
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({  userId: hrId });
     if (!hrExists) {
       return { done: false, message: "HR doesn't exist" };
     }
@@ -210,7 +210,7 @@ export const updateDepartment = async (companyId, hrId, payload) => {
     const updateData = {
       department: payload.department,
       status: payload.status,
-      updatedBy: new ObjectId(hrId),
+      updatedBy: hrId,
       updatedAt: new Date(),
     };
 
@@ -250,7 +250,7 @@ export const deleteDepartment = async (companyId, hrId, departmentId) => {
     const collections = getTenantCollections(companyId);
     const departmentObjId = new ObjectId(departmentId);
 
-    const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+    const hrExists = await collections.hr.countDocuments({  userId: hrId  });
     if (!hrExists) {
       return { done: false, message: "HR doesn't exist" };
     }

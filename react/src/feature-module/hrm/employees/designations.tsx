@@ -843,5 +843,4 @@ const Designations = () => {
     </>
   )
 }
-
 export default Designations

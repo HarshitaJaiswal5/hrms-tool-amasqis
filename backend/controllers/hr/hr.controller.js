@@ -7,26 +7,31 @@ import * as hrmDepartment from "../../services/hr/hrm.department.js";
 import * as hrmEmployee from "../../services/hr/hrm.employee.js"
 
 const hrDashboardController = (socket, io) => {
-    const isDevelopment = process.env.NODE_ENV === "development";
+   const isDevelopment =
+        process.env.NODE_ENV === "development" || process.env.NODE_ENV === "production";
 
     const validateHrAccess = (socket) => {
-        if (!socket || !socket.companyId || !socket.hrId) {
-            throw new Error("Company ID or HR ID not found in user metadata");
+
+        if (!socket.companyId) {
+            console.error("[HR] Company ID not found in user metadata", { user: socket.user?.sub });
+            throw new Error("Company ID not found in user metadata");
         }
         const companyIdRegex = /^[a-zA-Z0-9_-]{3,50}$/;
         if (!companyIdRegex.test(socket.companyId)) {
+            console.error(`[HR] Invalid company ID format: ${socket.companyId}`);
             throw new Error("Invalid company ID format");
         }
         if (socket.userMetadata?.companyId !== socket.companyId) {
+            console.error(
+                `[HR] Company ID mismatch: user metadata has ${socket.userMetadata?.companyId}, socket has ${socket.companyId}`
+            );
             throw new Error("Unauthorized: Company ID mismatch");
         }
-        if (socket.userMetadata?.hrId !== socket.hrId) {
-            throw new Error("Unauthorized: HR ID mismatch");
+        if (socket.userMetadata?.role !== "hr") {
+            console.error(`[HR] Unauthorized role: ${socket.userMetadata?.role}, HR role required`);
+            throw new Error("Unauthorized: HR role required");
         }
-        return {
-            companyId: socket.companyId,
-            hrId: socket.hrId,
-        };
+        return { companyId: socket.companyId, hrId: socket.user?.sub };
     };
 
     const withRateLimit = (handler) => {
@@ -215,20 +220,20 @@ const hrDashboardController = (socket, io) => {
         return null;
     };
 
-    socket.on("hr/departments/get", async (data) => {
+    socket.on("hr/departments/get", async () => {
         try {
-            console.log("[hr/departments/get] Event received with data:", data);
+            console.log("[hr/departments/get] Event received with data:", );
 
             const { companyId, hrId } = validateHrAccess(socket);
             console.log("[hr/departments/get] Access validated - companyId:", companyId, "hrId:", hrId);
 
             const response = await hrmDepartment.allDepartments(companyId, hrId);
-            // console.log("[hr/departments/get] Service response:", response);
+            console.log("[hr/departments/get] Service response:", response);
 
             socket.emit("hr/departments/get-response", response);
             // console.log("[hr/departments/get] Response emitted");
         } catch (error) {
-            console.error("[hr/departments/get] Error:", error);
+            console.log("[hr/departments/get] Error:", error);
             socket.emit("hr/departments/get-response", {
                 done: false,
                 error: "Unexpected error fetching departments",
@@ -258,8 +263,7 @@ const hrDashboardController = (socket, io) => {
                 endDate = isNaN(ed.getTime()) ? null : ed;
             }
 
-            const allowedStatus = ["active", "inactive"];
-
+            const allowedStatus = ["active", "inactive", "Active", "Inactive"];
             const departmentId =
                 typeof rawDeparmentId === "string" ? rawDeparmentId.trim() : "";
 
@@ -288,7 +292,7 @@ const hrDashboardController = (socket, io) => {
             const {
                 startDate: rawStartDate,
                 endDate: rawEndDate,
-                departmentId: rawDeparmentId,
+                designationId: rawdesignationId,
                 status: rawStatus,
             } = payload || {};
 
@@ -304,17 +308,17 @@ const hrDashboardController = (socket, io) => {
                 endDate = isNaN(ed.getTime()) ? null : ed;
             }
 
-            const allowedStatus = ["Active", "Inactive"];
+            const allowedStatus = ["Active", "Inactive", "active", "inactive"];
 
-            const departmentId =
-                typeof rawDeparmentId === "string" ? rawDeparmentId.trim() : "";
+            const designationId =
+                typeof rawdesignationId === "string" ? rawdesignationId.trim() : "";
 
             const status =
                 typeof rawStatus === "string" && allowedStatus.includes(rawStatus.trim())
                     ? rawStatus.trim()
                     : null;
 
-            const sanitizedFilter = { startDate, endDate, departmentId, status };
+            const sanitizedFilter = { startDate, endDate, designationId, status };
             const result = await hrServices.getEmployeeGridsStats(companyId, hrId, sanitizedFilter);
 
             socket.emit("hrm/employees/get-employee-grid-stats-response", result);
@@ -728,8 +732,8 @@ const hrDashboardController = (socket, io) => {
                         sanitizedFilters.status = statusTrim;
                     }
                 }
-                if (typeof filters.departmentId === "string" && filters.departmentId.trim() !== "") {
-                    sanitizedFilters.departmentId = filters.departmentId.trim();
+                if (typeof filters.department === "string" && filters.department.trim() !== "") {
+                    sanitizedFilters.departmentId = filters.department.trim();
                 }
             }
             console.log("[hrm/designations/get] Sanitized filters:", sanitizedFilters);
@@ -843,21 +847,16 @@ const hrDashboardController = (socket, io) => {
     socket.on("hrm/employees/add", withRateLimit(async (data) => {
         try {
             const { companyId, hrId } = validateHrAccess(socket);
-
             if (!data) {
                 throw new Error("Employee data is required");
             }
-
             const { employeeData, permissionsData } = data;
-
             if (!employeeData || typeof employeeData !== "object") {
                 throw new Error("Invalid or missing employeeData");
             }
-
             if (!permissionsData || typeof permissionsData !== "object") {
                 throw new Error("Invalid or missing permissionsData");
             }
-
             // Merge enabledModules & permissions into employeeData for validation convenience
             const mergedData = {
                 ...employeeData,
@@ -868,8 +867,6 @@ const hrDashboardController = (socket, io) => {
             const validationError = validateEmployeeData(mergedData);
 
             if (validationError) {
-                console.log("*****HELooozzzz");
-
                 throw new Error(validationError);
             }
 
@@ -877,7 +874,7 @@ const hrDashboardController = (socket, io) => {
 
             socket.emit("hrm/employees/add-response", response);
         } catch (error) {
-            console.error("Error in hrm/employees/add:", error);
+            console.log("Error in hrm/employees/add:", error);
             socket.emit("hrm/employees/add-response", {
                 done: false,
                 error: error.message || "Unexpected error adding employee",

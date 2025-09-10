@@ -468,7 +468,7 @@ const EmployeeList = () => {
       title: "Status",
       dataIndex: "status",
       render: (text: string, record: any) => (
-        <span className={`badge ${text === 'Active' ? 'badge-success' : 'badge-danger'} d-inline-flex align-items-center badge-xs`}>
+        <span className={`badge ${((text === 'active') || (text === 'Active')) ? 'badge-success' : 'badge-danger'} d-inline-flex align-items-center badge-xs`}>
           <i className="ti ti-point-filled me-1" />
           {text}
         </span>
@@ -890,18 +890,21 @@ const EmployeeList = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     try {
       e.preventDefault();
+console.log("Helllo1");
 
       setError("null");
 
       if (!validateForm()) {
         return;
       }
+      console.log("Helllo1");
 
       const anyModuleEnabled = Object.values(permissions.enabledModules).some(Boolean);
       if (!anyModuleEnabled) {
         setError("Please enable at least one module before saving permissions.");
         return;
       }
+      console.log("Helllo1");
       setLoading(true);
       // Extract basic info fields separately
       const {
@@ -943,7 +946,7 @@ const EmployeeList = () => {
         designationId,
         about,
       };
-
+console.log("Helllo1");
       // Prepare full submission data
       const submissionData = {
         employeeData: basicInfo,
@@ -1380,7 +1383,7 @@ const EmployeeList = () => {
                         Ascending
                       </button>
                     </li>
-                    <li>
+                    <li>  
                       <button
                         type="button"
                         className="dropdown-item rounded-1"

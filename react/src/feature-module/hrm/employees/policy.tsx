@@ -18,12 +18,12 @@ interface Policy {
 }
 
 interface Department {
-  name: string;
+  _id: string;
+  department: string;
 }
 
 const staticOptions = [
   { value: "Select", label: "Select" },
-  { value: "All Department", label: "All Department" },
 ];
 
 const Policy = () => {
@@ -159,13 +159,13 @@ const Policy = () => {
 
   const dynamicOptions = Array.isArray(departments)
     ? departments.map(dept => ({
-      value: dept.name,
-      label: dept.name,
+      value: dept._id,
+      label: dept.department,
     }))
     : [];
 
   const options = [...staticOptions, ...dynamicOptions];
-
+  
   const columns = [
     {
       title: "Name",
@@ -280,6 +280,8 @@ const Policy = () => {
     }
   };
 
+  console.log("selected department", selectedDepartment);
+  
   const applyFilters = (updatedFields: {
     department?: string;
     startDate?: string;
@@ -620,7 +622,7 @@ const Policy = () => {
                       <CommonSelect
                         className="select"
                         options={options}
-                        defaultValue={options[0]}
+                        defaultValue={selectedDepartment}
                         onChange={(option) =>
                           setSelectedDepartment(
                             typeof option === 'string'

@@ -9,7 +9,7 @@ export const addDesignation = async (companyId, hrId, payload) => {
         }
         const collections = getTenantCollections(companyId);
         const hrExists = await collections.hr.countDocuments({
-            _id: new ObjectId(hrId)
+             userId: hrId 
         });
         if (!hrExists) return { done: false, error: "HR not found" };
         if (!payload.designation || !payload.departmentId) {
@@ -29,7 +29,7 @@ export const addDesignation = async (companyId, hrId, payload) => {
         const result = await collections.designations.insertOne({
             ...payload,
             status: payload.status || 'active',
-            createdBy: new ObjectId(hrId),
+            createdBy: hrId,
             createdAt: new Date(),
         });
 
@@ -37,7 +37,7 @@ export const addDesignation = async (companyId, hrId, payload) => {
             done: true,
             data: {
                 _id: result.insertedId,
-                createdBy: new ObjectId(hrId),
+                createdBy: hrId,
             },
             message: "Designation added successfully"
         };
@@ -58,10 +58,9 @@ export const deleteDesignation = async (companyId, hrId, designationId) => {
 
         const collections = getTenantCollections(companyId);
         const designationObjId = new ObjectId(designationId);
-        const hrObjId = new ObjectId(hrId);
 
         const [hrExists, designation] = await Promise.all([
-            collections.hr.countDocuments({ _id: hrObjId }),
+            collections.hr.countDocuments({  userId: hrId  }),
             collections.designations.findOne({ _id: designationObjId }),
         ]);
 
@@ -111,7 +110,7 @@ export const displayDesignations = async (companyId, hrId, filters) => {
         }
         
         const collections = getTenantCollections(companyId);
-        const hrExists = await collections.hr.countDocuments({ _id: new ObjectId(hrId) });
+        const hrExists = await collections.hr.countDocuments({  userId: hrId  });
         if (!hrExists) return { done: false, error: "HR not found" };
 
         const query = {};
@@ -215,7 +214,7 @@ export const updateDesignation = async (companyId, hrId, payload) => {
         const collections = getTenantCollections(companyId);
 
         const hrExists = await collections.hr.countDocuments({
-            _id: new ObjectId(hrId)
+             userId: hrId 
         });
         if (!hrExists) {
             return { done: false, error: "HR doesn't exist" };
@@ -276,7 +275,7 @@ export const updateDesignation = async (companyId, hrId, payload) => {
                         new ObjectId(payload.departmentId) : 
                         designationExists.departmentId,
                     status: payload.status || designationExists.status,
-                    updatedBy: new ObjectId(hrId),
+                    updatedBy: hrId,
                     updatedAt: new Date()
                 }
             }
